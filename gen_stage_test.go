@@ -7,11 +7,18 @@ import (
 	"github.com/halturin/ergo/etf"
 )
 
-type GenStageTest struct {
+type GenStageProducerTest struct {
 	GenStage
+	sub GenStageSubscription
 }
 
-func (gs *GenStageTest) InitStage(process *Process, args ...interface{}) (GenStageOptions, interface{}) {
+type GenStageConsumerTest struct {
+	GenStage
+	sub GenStageSubscription
+}
+
+// GenStage Producer
+func (gs *GenStageProducerTest) InitStage(process *Process, args ...interface{}) (GenStageOptions, interface{}) {
 	opts := GenStageOptions{
 		stageType: GenStageTypeProducer,
 		demand:    GenStageDemandModeForward,
@@ -19,23 +26,51 @@ func (gs *GenStageTest) InitStage(process *Process, args ...interface{}) (GenSta
 	return opts, nil
 }
 
-func (gs *GenStageTest) HandleCancel(cancelReason etf.Term, from etf.Term, state interface{}) (string, etf.Term, interface{}) {
+func (gs *GenStageProducerTest) HandleCancel(cancelReason etf.Term, from etf.Term, state interface{}) (string, etf.Term, interface{}) {
 	return "noreply", "subscription", state
 }
 
-func (gs *GenStageTest) HandleDemand(demand uint64, state interface{}) (string, etf.Term, interface{}) {
+func (gs *GenStageProducerTest) HandleDemand(demand uint64, state interface{}) (string, etf.Term, interface{}) {
 	return "noreply", 1, state
 }
 
-func (gs *GenStageTest) HandleEvents(events interface{}, from etf.Term, state interface{}) (string, interface{}) {
+func (gs *GenStageProducerTest) HandleEvents(events interface{}, from etf.Term, state interface{}) (string, interface{}) {
 	return "asdf", state
 }
 
-func (gs *GenStageTest) HandleSubscribe(stageType GenStageType, options etf.List, state interface{}) (GenStageSubscriptionMode, interface{}) {
+func (gs *GenStageProducerTest) HandleSubscribe(stageType GenStageType, options etf.List, state interface{}) (GenStageSubscriptionMode, interface{}) {
+	fmt.Println("got subs")
+	return GenStageSubscriptionModeAuto, state
+}
+
+// GenStage Consumer
+func (gs *GenStageConsumerTest) InitStage(process *Process, args ...interface{}) (GenStageOptions, interface{}) {
+	opts := GenStageOptions{
+		stageType: GenStageTypeConsumer,
+	}
+	return opts, nil
+}
+
+func (gs *GenStageConsumerTest) HandleCancel(cancelReason etf.Term, from etf.Term, state interface{}) (string, etf.Term, interface{}) {
+	return "noreply", "subscription", state
+}
+
+func (gs *GenStageConsumerTest) HandleDemand(demand uint64, state interface{}) (string, etf.Term, interface{}) {
+	return "noreply", 1, state
+}
+
+func (gs *GenStageConsumerTest) HandleEvents(events interface{}, from etf.Term, state interface{}) (string, interface{}) {
+	return "asdf", state
+}
+
+func (gs *GenStageConsumerTest) HandleSubscribe(stageType GenStageType, options etf.List, state interface{}) (GenStageSubscriptionMode, interface{}) {
 	return GenStageSubscriptionModeAuto, state
 }
 
 func TestGenStage(t *testing.T) {
+	var err error
+	var sub GenStageSubscription
+
 	fmt.Printf("\n=== Test GenStage\n")
 	fmt.Printf("Starting node: nodeGenStage01@localhost...")
 
@@ -46,9 +81,22 @@ func TestGenStage(t *testing.T) {
 		return
 	}
 
-	_, err := node1.Spawn("stage1", ProcessOptions{}, &GenStageTest{}, nil)
+	producer := &GenStageProducerTest{}
+	consumer := &GenStageConsumerTest{}
+	_, err = node1.Spawn("stageProducer1", ProcessOptions{}, producer, nil)
+	consumerProcess, err := node1.Spawn("stageConsumer1", ProcessOptions{}, consumer, nil)
 
-	fmt.Println("OK", err)
+	subOpts := GenStageSubscriptionOptions{
+		Mode: GenStageSubscriptionModeAuto,
+	}
+	if sub, err = consumer.Subscribe(consumerProcess, "stageProducer1", subOpts); err != nil {
+		t.Fatal(err)
+	}
+
+	consumer.sub = sub
+	producer.sub = sub
+
+	fmt.Println("OK")
 
 	node1.Stop()
 }

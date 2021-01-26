@@ -165,7 +165,9 @@ func (gs *GenStage) Init(p *Process, args ...interface{}) interface{} {
 
 func (gs *GenStage) HandleCall(from etf.Tuple, message etf.Term, state interface{}) (string, etf.Term, interface{}) {
 	var r stageMessage
+	fmt.Println("Stage call")
 	if err := etf.TermIntoStruct(message, &r); err != nil {
+		fmt.Println("Stage call err", err)
 		return "reply", "error", state
 	}
 
@@ -177,14 +179,17 @@ func (gs *GenStage) HandleCall(from etf.Tuple, message etf.Term, state interface
 }
 
 func (gs *GenStage) HandleCast(message etf.Term, state interface{}) (string, interface{}) {
+	fmt.Println("Stage cast")
 	return "noreply", state
 }
 
 func (gs *GenStage) HandleInfo(message etf.Term, state interface{}) (string, interface{}) {
+	fmt.Println("Stage info")
 	return "noreply", state
 }
 
 func (gs *GenStage) Terminate(reason string, state interface{}) {
+	fmt.Println("Stage term")
 	return
 }
 
@@ -230,7 +235,7 @@ func (gst *GenStage) Cancel(subscription GenStageSubscription) error {
 }
 
 func handleRequest(m stageMessage, opts GenStageOptions) error {
-
+	fmt.Println("req", m.request)
 	switch m.request {
 	case "$gen_consumer":
 		handleConsumer(m.from, m.command)

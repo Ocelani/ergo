@@ -68,6 +68,8 @@ Here are the changes of latest release. For more details see the [ChangeLog](Cha
 
 * Improved DIST implementation in order to support KeepAlive messages and get rid of platform-dependent `syscall` usage
 
+* Fixed `TermIntoStruct` function. There was a problem with `Tuple` value transforming into the given struct
+
 * Fixed race condition and freeze of connection serving in corner case [#21](https://github.com/halturin/ergo/issues/21)
 
 * Fixed problem with monitoring process by the registered name (local and remote)
