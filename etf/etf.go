@@ -194,7 +194,7 @@ func termIntoStruct(term Term, dest reflect.Value) error {
 	case Map:
 		return setMapField(v, dest, t)
 	case List:
-		return setListField([]Term(v), dest, t)
+		return setListField(v, dest, t)
 	case Tuple:
 		return setStructField([]Term(v), dest, t)
 	default:
@@ -204,7 +204,7 @@ func termIntoStruct(term Term, dest reflect.Value) error {
 	return nil
 }
 
-func setListField(term []Term, dest reflect.Value, t reflect.Type) error {
+func setListField(term List, dest reflect.Value, t reflect.Type) error {
 	var value reflect.Value
 
 	switch t.Kind() {
@@ -248,7 +248,11 @@ func setMapField(term Map, dest reflect.Value, t reflect.Type) error {
 }
 
 func setStructField(term Tuple, dest reflect.Value, t reflect.Type) error {
-	fmt.Println("KKK", term)
+	if dest.Kind() == reflect.Ptr {
+		pdest := reflect.New(dest.Type().Elem())
+		dest.Set(pdest)
+		dest = pdest.Elem()
+	}
 	for i, elem := range term {
 		if err := termIntoStruct(elem, dest.Field(i)); err != nil {
 			return err
@@ -370,7 +374,7 @@ type StructPopulatorError struct {
 }
 
 func (s *StructPopulatorError) Error() string {
-	return fmt.Sprintf("Cannot put %v into go value of type %s", s.Term, s.Type.Kind().String())
+	return fmt.Sprintf("Cannot put %#v into go value of type %s", s.Term, s.Type.Kind().String())
 }
 
 func NewInvalidTypesError(t reflect.Type, term Term) error {

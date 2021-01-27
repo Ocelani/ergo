@@ -128,19 +128,22 @@ func TestTermIntoStruct_Struct(t *testing.T) {
 					},
 				},
 			},
-			Term: Tuple{
-				Tuple{
-					List{true, false, false, true, false},
-					8765,
-					"test value",
+			Term: Tuple{ //testStruct
+				Tuple{ // AA testAA
+					List{true, false, false, true, false}, // A []bool
+					8765,                                  // B uint32
+					"test value",                          // C string
 				},
-				3.14,
-				Tuple{
-					Tuple{},
-					4.14,
-					Tuple{
-						List{false, true},
-						5,
+				3.13, // BB float64
+				Tuple{ // CC *testStruct
+					Tuple{}, // AA testAA (empty)
+					4.14,    // BB float64
+					Tuple{ // CC *testStruct
+						Tuple{ // AA testAA
+							List{false, true}, // A []bool
+							5,                 // B uint32
+							// C string (empty)
+						},
 					},
 				},
 			},
@@ -153,7 +156,7 @@ func TestTermIntoStruct_Struct(t *testing.T) {
 		}
 
 		if !reflect.DeepEqual(dest, tt.Want) {
-			t.Errorf("%#v: got %v, want %v", tt.Term, dest, tt.Want)
+			t.Errorf("%#v: got %#v, want %#v", tt.Term, dest, tt.Want)
 		}
 	}
 }
