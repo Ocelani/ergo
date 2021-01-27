@@ -66,6 +66,8 @@ Here are the changes of latest release. For more details see the [ChangeLog](Cha
 
 * Introduced `SetTrapExit`/`GetTrapExit` methods for `Process` in order to control the trapping `{'EXIT', from, reason}` message
 
+* Introduced `TermMapIntoStruct` function. It should be easy now to transform `etf.Map` into the given struct. See documentation for the details.
+
 * Improved DIST implementation in order to support KeepAlive messages and get rid of platform-dependent `syscall` usage
 
 * Fixed `TermIntoStruct` function. There was a problem with `Tuple` value transforming into the given struct

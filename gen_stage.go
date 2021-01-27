@@ -138,19 +138,20 @@ type stateGenStage struct {
 }
 
 type stageRequestFrom struct {
-	pid etf.Pid
-	ref etf.Ref
+	Pid etf.Pid
+	Ref etf.Ref
 }
 
 type stageRequestCommand struct {
-	cmd   etf.Atom
-	value etf.Term
+	Cmd   etf.Atom
+	Value etf.Term
+	Opts  etf.Term
 }
 
 type stageMessage struct {
-	request etf.Atom
-	from    stageRequestFrom
-	command stageRequestCommand
+	Request etf.Atom
+	From    stageRequestFrom
+	Command stageRequestCommand
 }
 
 func (gs *GenStage) Init(p *Process, args ...interface{}) interface{} {
@@ -218,7 +219,7 @@ func (gst *GenStage) Subscribe(p *Process, to etf.Term, opts GenStageSubscriptio
 
 	msg := etf.Tuple{
 		"$gen_producer",
-		etf.Tuple{subscription.id, p.Self()},
+		etf.Tuple{p.Self(), subscription.id},
 		etf.Tuple{etf.Atom("subscribe"), nil, opts},
 	}
 	p.Call(to, msg)
@@ -235,12 +236,12 @@ func (gst *GenStage) Cancel(subscription GenStageSubscription) error {
 }
 
 func handleRequest(m stageMessage, opts GenStageOptions) error {
-	fmt.Println("req", m.request)
-	switch m.request {
+	fmt.Println("req", m.Request)
+	switch m.Request {
 	case "$gen_consumer":
-		handleConsumer(m.from, m.command)
+		handleConsumer(m.From, m.Command)
 	case "$gen_producer":
-		handleProducer(m.from, m.command)
+		handleProducer(m.From, m.Command)
 	case "$demand":
 	case "$subscribe":
 	case "$info":

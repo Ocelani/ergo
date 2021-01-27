@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"reflect"
+	"strings"
 )
 
 type Term interface{}
@@ -132,18 +133,41 @@ func (p Pid) Str() string {
 	return fmt.Sprintf("<%X.%d.%d>", hasher32.Sum32(), p.ID, p.Serial)
 }
 
-// TermIntoStruct transforms 'term' (etf.Term, etf.List, etf.Tuple) into the
+// TermIntoStruct transforms 'term' (etf.Term, etf.List, etf.Tuple, etf.Map) into the
 // given 'dest' (could be a struct, map, slice or array). Its a pretty
 // expencive operation in terms of CPU usage so you shouldn't use it
 // on highload parts of your code. Use manual type casting instead.
-func TermIntoStruct(term Term, dest interface{}) error {
+func TermIntoStruct(term Term, dest interface{}) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("%v", r)
+		}
+	}()
 	v := reflect.Indirect(reflect.ValueOf(dest))
-	return termIntoStruct(term, v)
+	err = termIntoStruct(term, v)
+	return
+}
 
+// TermMapIntoSturct transforms etf.Map into the given 'dest'.
+// There are limitations to use this helper. A key of the given etf.Map
+// must be a string or etf.Atom. 'dest' must be a structure with
+// specified tag 'etf' and the name of a key for every single field.
+func TermMapIntoStruct(term Term, dest interface{}) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("%v", r)
+		}
+	}()
+	v := reflect.Indirect(reflect.ValueOf(dest))
+	return setMapStructField(term.(Map), v)
 }
 
 func termIntoStruct(term Term, dest reflect.Value) error {
 	t := dest.Type()
+
+	if term == nil {
+		return nil
+	}
 
 	if t.Kind() == reflect.Interface {
 		dest.Set(reflect.ValueOf(term))
@@ -204,6 +228,10 @@ func termIntoStruct(term Term, dest reflect.Value) error {
 	return nil
 }
 
+func termMapIntoStruct(term Term, dest reflect.Value) error {
+	return nil
+}
+
 func setListField(term List, dest reflect.Value, t reflect.Type) error {
 	var value reflect.Value
 
@@ -236,8 +264,6 @@ func setMapField(term Map, dest reflect.Value, t reflect.Type) error {
 	switch t.Kind() {
 	case reflect.Map:
 		return setMapMapField(term, dest, t)
-	//case reflect.Struct:
-	//	return setMapStructField(term, dest, t)
 	case reflect.Interface:
 		// TODO... do this a better way
 		dest.Set(reflect.ValueOf(term))
@@ -263,86 +289,72 @@ func setStructField(term Tuple, dest reflect.Value, t reflect.Type) error {
 
 }
 
-//func setMapStructField(term Map, dest reflect.Value, t reflect.Type) error {
-//	numField := t.NumField()
-//	fields := make([]reflect.StructField, numField)
-//	for i, _ := range fields {
-//		fields[i] = t.Field(i)
-//	}
-//
-//	for key, val := range term {
-//		fName, ok := StringTerm(key)
-//		if !ok {
-//			return &InvalidStructKeyError{Term: key}
-//		}
-//		index, _ := findStructField(fields, fName)
-//		if index == -1 {
-//			continue
-//		}
-//
-//		err := termIntoStruct(val, dest.Field(index))
-//		if err != nil {
-//			return err
-//		}
-//	}
-//
-//	return nil
-//}
+func setMapStructField(term Map, dest reflect.Value) error {
+	t := dest.Type()
+	numField := t.NumField()
+	fields := make([]reflect.StructField, numField)
+	for i, _ := range fields {
+		fields[i] = t.Field(i)
+	}
 
-//func findStructField(term []reflect.StructField, key string) (index int, structField reflect.StructField) {
-//	index = -1
-//	for i, f := range term {
-//		tag := f.Tag.Get("etf")
-//		split := strings.Split(tag, ",")
-//		if len(split) > 0 && split[0] != "" {
-//			if split[0] == key {
-//				return i, f
-//			}
-//		} else {
-//			if strings.EqualFold(f.Name, key) {
-//				structField = f
-//				index = i
-//			}
-//		}
-//	}
-//
-//	return
-//}
+	for key, val := range term {
+		fName, ok := StringTerm(key)
+		if !ok {
+			return &InvalidStructKeyError{Term: key}
+		}
+		index, _ := findStructField(fields, fName)
+		if index == -1 {
+			continue
+		}
+
+		err := termIntoStruct(val, dest.Field(index))
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func findStructField(term []reflect.StructField, key string) (index int, structField reflect.StructField) {
+	index = -1
+	for i, f := range term {
+		tag := f.Tag.Get("etf")
+		split := strings.Split(tag, ",")
+		if len(split) > 0 && split[0] != "" {
+			if split[0] == key {
+				return i, f
+			}
+		} else {
+			if strings.EqualFold(f.Name, key) {
+				structField = f
+				index = i
+			}
+		}
+	}
+
+	return
+}
 
 func setMapMapField(term Map, dest reflect.Value, t reflect.Type) error {
 	if dest.IsNil() {
 		dest.Set(reflect.MakeMapWithSize(t, len(term)))
 	}
+	tkey := t.Key()
+	tval := t.Elem()
 	for key, val := range term {
-		dest.SetMapIndex(reflect.ValueOf(key), reflect.ValueOf(val))
+		destkey := reflect.Indirect(reflect.New(tkey))
+		if err := termIntoStruct(key, destkey); err != nil {
+			return err
+		}
+		destval := reflect.Indirect(reflect.New(tval))
+		if err := termIntoStruct(val, destval); err != nil {
+			return err
+		}
+		dest.SetMapIndex(destkey, destval)
 	}
 	return nil
 }
-
-//func setStringField(s string, dest reflect.Value, t reflect.Type) error {
-//	if t.Kind() == reflect.Bool {
-//		switch s {
-//		case "false":
-//			dest.SetBool(false)
-//		case "true":
-//			dest.SetBool(true)
-//		default:
-//			return NewInvalidTypesError(t, Atom(s))
-//		}
-//
-//		return nil
-//	}
-//
-//	if t.Kind() != reflect.String && (s == "" || s == "nil") {
-//		return numSwitch(0, dest, t)
-//	}
-//
-//	if t.Kind() != reflect.String {
-//		return NewInvalidTypesError(t, Atom(s))
-//	}
-//
-//	return nil
-//}
 
 func setIntField(i int64, field reflect.Value, t reflect.Type) error {
 	switch t.Kind() {
