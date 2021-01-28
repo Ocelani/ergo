@@ -7,7 +7,7 @@
 [![codecov](https://codecov.io/gh/halturin/ergo/graph/badge.svg)](https://codecov.io/gh/halturin/ergo)
 [![Build Status](https://travis-ci.org/halturin/ergo.svg)](https://travis-ci.org/halturin/ergo)
 
-Implementation of Erlang/OTP in Golang. Up to x5 times faster than original Erlang/OTP. The easiest drop-in replacement for your hot nodes in the cluster.
+Implementation of Erlang/OTP in Golang. Up to x5 times faster than original Erlang/OTP in terms of network messaging. The easiest drop-in replacement for your hot nodes in the cluster.
 
 ### Purpose ###
 
@@ -24,7 +24,7 @@ The goal of this project is to leverage Erlang/OTP experience with Golang perfor
 * `Application` behaviour support
 * `GenStage` behaviour support (originated from Elixir's [GenStage](https://hexdocs.pm/gen_stage/GenStage.html))
 * Connect to (accept connection from) any Erlang node within a cluster (or clusters, if running as multinode)
-* Making sync/async request in fashion of `gen_server:call` or `gen_server:cast`
+* Making sync request `process.Call`, async - `process.Cast` or `process.Send` in fashion of `gen_server:call`, `gen_server:cast`, `erlang:send` accordingly
 * Monitor processes/nodes
   * local -> local
   * local -> remote
@@ -35,9 +35,9 @@ The goal of this project is to leverage Erlang/OTP experience with Golang perfor
   * remote <-> local
 * RPC callbacks support
 * Experimental [observer support](#observer)
-* Unmarshalling terms into the struct using etf.TermIntoStruct
+* Unmarshalling terms into the struct using `etf.TermIntoStruct` or `etf.TermMapIntoStruct`
 * Support Erlang 22. (with [fragmentation](http://blog.erlang.org/OTP-22-Highlights/))
-* Encryption (TLS 1.3) support
+* Encryption (TLS 1.3) support (including autogenerating self-signed sertificates)
 * Tested and confirmed support Windows, Darwin (MacOS), Linux
 
 ### Requirements ###
@@ -106,7 +106,7 @@ PASS
 ok  	github.com/halturin/ergo	120.720s
 ```
 
-it means Ergo Framework provides around 25000 sync rps via localhost for simple data and around 4Gbit/sec for 1MB messages
+it means Ergo Framework provides around **25.000 sync requests per second** via localhost for simple data and around 4Gbit/sec for 1MB messages
 
 #### Parallel GenServer.Call using 120 pairs of processes running on a single and two nodes
 
@@ -121,7 +121,7 @@ PASS
 ok  	github.com/halturin/ergo	34.145s
 ```
 
-these numbers shows around 260000 sync rps via localhost using simple data for messaging
+these numbers shows around **260.000 sync requests per second** via localhost using simple data for messaging
 
 #### vs original Erlang/OTP
 
