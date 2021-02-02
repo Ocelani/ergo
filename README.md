@@ -35,8 +35,8 @@ The goal of this project is to leverage Erlang/OTP experience with Golang perfor
   * remote <-> local
 * RPC callbacks support
 * Experimental [observer support](#observer)
-* Unmarshalling terms into the struct using `etf.TermIntoStruct` or `etf.TermMapIntoStruct`
-* Support Erlang 22. (with [fragmentation](http://blog.erlang.org/OTP-22-Highlights/))
+* Unmarshalling terms into the struct using `etf.TermIntoStruct`, `etf.TermMapIntoStruct` or `etf.TermProplistIntoStruct`
+* Support Erlang 22. (including [fragmentation](http://blog.erlang.org/OTP-22-Highlights/) feature)
 * Encryption (TLS 1.3) support (including autogenerating self-signed sertificates)
 * Tested and confirmed support Windows, Darwin (MacOS), Linux
 
@@ -66,7 +66,7 @@ Here are the changes of latest release. For more details see the [ChangeLog](Cha
 
 * Introduced `SetTrapExit`/`GetTrapExit` methods for `Process` in order to control the trapping `{'EXIT', from, reason}` message
 
-* Introduced `TermMapIntoStruct` function. It should be easy now to transform `etf.Map` into the given struct. See documentation for the details.
+* Introduced `TermMapIntoStruct` and `TermProplistIntoStruct` functions. It should be easy now to transform `etf.Map` or `[]eft.ProplistElement` into the given struct. See documentation for the details.
 
 * Improved DIST implementation in order to support KeepAlive messages and get rid of platform-dependent `syscall` usage
 

@@ -110,25 +110,19 @@ type GenStageBehaviour interface {
 	//     this kind of subscription must be canceled when HandleCancel is called
 	// For producers, successful subscriptions must always return GenStageSubscriptionAuto.
 	// Manual mode is not supported.
-	HandleSubscribe(stageType GenStageType, options etf.List, state interface{}) (GenStageSubscriptionMode, interface{})
-}
-
-type GenStageSubscription struct {
-	to      etf.Term
-	self    *Process
-	id      etf.Ref
-	options GenStageSubscriptionOptions
+	HandleSubscribe(stageType GenStageType, options GenStageSubscriptionOptions, state interface{}) (GenStageSubscriptionMode, interface{})
 }
 
 type GenStageSubscriptionOptions struct {
-	MinDemand uint
-	MaxDemand uint
-	Mode      GenStageSubscriptionMode
-	Cancel    GenStageSubscriptionCancel
+	MinDemand uint                       `etf:"min_demand"`
+	MaxDemand uint                       `etf:"max_demand"`
+	Mode      GenStageSubscriptionMode   `etf:"mode"`
+	Cancel    GenStageSubscriptionCancel `etf:"cancel"`
 }
 
 type GenStage struct {
 	GenServer
+	mode GenStageDemandMode
 }
 
 type stateGenStage struct {
@@ -142,10 +136,15 @@ type stageRequestFrom struct {
 	Ref etf.Ref
 }
 
+type stageRequestCommandCancel struct {
+	Subscription etf.Ref
+	Reason       etf.Term
+}
+
 type stageRequestCommand struct {
-	Cmd   etf.Atom
-	Value etf.Term
-	Opts  etf.Term
+	Cmd    etf.Atom
+	Cancel stageRequestCommandCancel
+	Value  etf.Term
 }
 
 type stageMessage struct {
@@ -154,6 +153,72 @@ type stageMessage struct {
 	Command stageRequestCommand
 }
 
+//
+// GenStage' object methods
+//
+
+// SetDemandMode Sets the demand mode for a producer
+// When DemandModeForward (by default), the demand is always forwarded to the HandleDemand callback.
+// When DemandModeAccumulate, demand is accumulated until its mode is set to DemandModeForward.
+// This is useful as a synchronization mechanism, where the demand is accumulated until
+// all consumers are subscribed.
+func (gst *GenStage) SetDemandMode(mode GenStageDemandMode) {
+	gst.mode = mode
+}
+func (gst *GenStage) GetDemandMode() GenStageDemandMode {
+	return gst.mode
+}
+
+func (gst *GenStage) Subscribe(p *Process, to etf.Term, opts GenStageSubscriptionOptions) (etf.Ref, error) {
+	if p == nil {
+		return etf.Ref{}, fmt.Errorf("Subscription error. Process can not be nil")
+	}
+	if !p.IsAlive() {
+		return etf.Ref{}, fmt.Errorf("Subscription error. Process should be alive")
+	}
+
+	subscription_id := p.MonitorProcess(to)
+	subscribe_opts := etf.List{
+		etf.Tuple{
+			etf.Atom("min_demand"),
+			opts.MinDemand,
+		},
+		etf.Tuple{
+			etf.Atom("max_demand"),
+			opts.MaxDemand,
+		},
+		etf.Tuple{
+			etf.Atom("cancel"),
+			opts.Cancel,
+		},
+	}
+
+	msg := etf.Tuple{
+		etf.Atom("$gen_producer"),
+		etf.Tuple{p.Self(), subscription_id},
+		etf.Tuple{etf.Atom("subscribe"), nil, subscribe_opts},
+	}
+	if _, err := p.Call(to, msg); err != nil {
+		return etf.Ref{}, err
+	}
+
+	msg[0] = etf.Atom("$gen_consumer")
+	p.Cast(p.Self(), msg)
+
+	return subscription_id, nil
+}
+
+func (gst *GenStage) Ask(subscription etf.Ref) error {
+	return nil
+}
+
+func (gst *GenStage) Cancel(subscription etf.Ref) error {
+	return nil
+}
+
+//
+// GenServer callbacks
+//
 func (gs *GenStage) Init(p *Process, args ...interface{}) interface{} {
 	//var stageOptions GenStageOptions
 	var state stateGenStage
@@ -172,7 +237,7 @@ func (gs *GenStage) HandleCall(from etf.Tuple, message etf.Term, state interface
 		return "reply", "error", state
 	}
 
-	if err := handleRequest(r, state.(stateGenStage).options); err != nil {
+	if err, _ := handleRequest(r, state.(stateGenStage)); err != nil {
 		return "reply", "error", state
 	}
 
@@ -181,6 +246,16 @@ func (gs *GenStage) HandleCall(from etf.Tuple, message etf.Term, state interface
 
 func (gs *GenStage) HandleCast(message etf.Term, state interface{}) (string, interface{}) {
 	fmt.Println("Stage cast")
+	var r stageMessage
+	if err := etf.TermIntoStruct(message, &r); err != nil {
+		fmt.Println("Stage cast err", err)
+		return "noreply", state
+	}
+
+	if err, _ := handleRequest(r, state.(stateGenStage)); err != nil {
+		fmt.Println("Stage cast err handleRequest", err)
+		return "noreply", state
+	}
 	return "noreply", state
 }
 
@@ -194,66 +269,86 @@ func (gs *GenStage) Terminate(reason string, state interface{}) {
 	return
 }
 
-func (gst *GenStage) GetDemandMode() GenStageDemandMode {
-	return GenStageDemandModeForward //FIXME
-}
+// private functions
 
-// SetDemandMode Sets the demand mode for a producer
-// When DemandModeForward (by default), the demand is always forwarded to the handle_demand callback.
-// When DemandModeAccumulate, demand is accumulated until its mode is set to DemandModeForward.
-// This is useful as a synchronization mechanism, where the demand is accumulated until
-// all consumers are subscribed.
-func (gst *GenStage) SetDemandMode(mode GenStageDemandMode) {
-
-}
-
-func (gst *GenStage) Subscribe(p *Process, to etf.Term, opts GenStageSubscriptionOptions) (GenStageSubscription, error) {
-	var subscription GenStageSubscription
-	if p == nil {
-		return subscription, fmt.Errorf("Subscription error. Process can not be nil")
-	}
-
-	subscription.id = p.MonitorProcess(to)
-	subscription.self = p
-	subscription.options = opts
-
-	msg := etf.Tuple{
-		"$gen_producer",
-		etf.Tuple{p.Self(), subscription.id},
-		etf.Tuple{etf.Atom("subscribe"), nil, opts},
-	}
-	p.Call(to, msg)
-
-	return subscription, nil
-}
-
-func (gst *GenStage) Ask(subscription GenStageSubscription) error {
-	return nil
-}
-
-func (gst *GenStage) Cancel(subscription GenStageSubscription) error {
-	return nil
-}
-
-func handleRequest(m stageMessage, opts GenStageOptions) error {
-	fmt.Println("req", m.Request)
+func handleRequest(m stageMessage, state stateGenStage) (error, stateGenStage) {
 	switch m.Request {
 	case "$gen_consumer":
-		handleConsumer(m.From, m.Command)
+		return handleConsumer(m.From, m.Command, state)
 	case "$gen_producer":
-		handleProducer(m.From, m.Command)
-	case "$demand":
-	case "$subscribe":
-	case "$info":
+		return handleProducer(m.From, m.Command, state)
 	}
 
-	return fmt.Errorf("unknownRequest")
+	return fmt.Errorf("unknownRequest"), state
 }
 
-func handleConsumer(from stageRequestFrom, cmd stageRequestCommand) error {
-	return nil
+func handleConsumer(from stageRequestFrom, cmd stageRequestCommand, state stateGenStage) (error, stateGenStage) {
+	fmt.Printf("handleConsumer %#v\n", cmd)
+	var subscriptionOpts GenStageSubscriptionOptions
+	var subscriptionMode GenStageSubscriptionMode
+	switch cmd.Cmd {
+	case etf.Atom("subscribe"):
+		// receive this message as a confirmation of subscription
+		if state.options.stageType == GenStageTypeProducer {
+			return fmt.Errorf("GenStage with type GenStageTypeProducer cannot act as a consumer stage"), state
+		}
+		object := state.p.object
+
+		if err := etf.TermProplistIntoStruct(cmd.Value, &subscriptionOpts); err != nil {
+			return err, state
+		}
+		subscriptionMode, state.internal = object.(GenStageBehaviour).HandleSubscribe(GenStageTypeProducer, subscriptionOpts, state.internal)
+
+		switch subscriptionMode {
+		case GenStageSubscriptionModeStop:
+			// FIXME have to stop this process
+		case GenStageSubscriptionModeAuto:
+			// call Ask method
+
+		case GenStageSubscriptionModeManual:
+
+		}
+		return nil, state
+	}
+	return nil, state
 }
 
-func handleProducer(from stageRequestFrom, cmd stageRequestCommand) error {
-	return nil
+func handleProducer(from stageRequestFrom, cmd stageRequestCommand, state stateGenStage) (error, stateGenStage) {
+	fmt.Printf("handleProducer %#v\n", cmd)
+	var subscriptionOpts GenStageSubscriptionOptions
+	var subscriptionMode GenStageSubscriptionMode
+	if state.options.stageType == GenStageTypeConsumer {
+		return fmt.Errorf("GenStage with type GenStageTypeConsumer cannot act as a producer stage"), state
+	}
+	switch cmd.Cmd {
+	case etf.Atom("subscribe"):
+		if err := etf.TermProplistIntoStruct(cmd.Value, &subscriptionOpts); err != nil {
+			return err, state
+		}
+		object := state.p.object
+		subscriptionMode, state.internal = object.(GenStageBehaviour).HandleSubscribe(GenStageTypeConsumer, subscriptionOpts, state.internal)
+
+		switch subscriptionMode {
+		case GenStageSubscriptionModeStop:
+			//FIXME have to stop this process
+		case GenStageSubscriptionModeAuto:
+			// For producers, successful subscriptions must always return GenStageSubscriptionAuto
+
+		default:
+
+		}
+
+		return nil, state
+
+	case etf.Atom("ask"):
+		demand, ok := cmd.Value.(uint)
+		if !ok {
+			return fmt.Errorf("Demand has wrong value. Expected uint"), state
+		}
+		fmt.Println("GOT DEMAND", demand)
+
+	case etf.Atom("cancel"):
+		// <Object>.HandleCancel(cmd.Opts, from, state)
+	}
+	return nil, state
 }

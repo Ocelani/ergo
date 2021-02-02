@@ -3,18 +3,19 @@ package ergo
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/halturin/ergo/etf"
 )
 
 type GenStageProducerTest struct {
 	GenStage
-	sub GenStageSubscription
+	sub etf.Ref
 }
 
 type GenStageConsumerTest struct {
 	GenStage
-	sub GenStageSubscription
+	sub etf.Ref
 }
 
 // GenStage Producer
@@ -38,8 +39,8 @@ func (gs *GenStageProducerTest) HandleEvents(events interface{}, from etf.Term, 
 	return "asdf", state
 }
 
-func (gs *GenStageProducerTest) HandleSubscribe(stageType GenStageType, options etf.List, state interface{}) (GenStageSubscriptionMode, interface{}) {
-	fmt.Println("got subs")
+func (gs *GenStageProducerTest) HandleSubscribe(stageType GenStageType, options GenStageSubscriptionOptions, state interface{}) (GenStageSubscriptionMode, interface{}) {
+	fmt.Printf("got producer subs %#v %#v \n", stageType, options)
 	return GenStageSubscriptionModeAuto, state
 }
 
@@ -63,13 +64,14 @@ func (gs *GenStageConsumerTest) HandleEvents(events interface{}, from etf.Term, 
 	return "asdf", state
 }
 
-func (gs *GenStageConsumerTest) HandleSubscribe(stageType GenStageType, options etf.List, state interface{}) (GenStageSubscriptionMode, interface{}) {
+func (gs *GenStageConsumerTest) HandleSubscribe(stageType GenStageType, options GenStageSubscriptionOptions, state interface{}) (GenStageSubscriptionMode, interface{}) {
+	fmt.Printf("got consumer subs %#v %#v \n", stageType, options)
 	return GenStageSubscriptionModeAuto, state
 }
 
 func TestGenStage(t *testing.T) {
 	var err error
-	var sub GenStageSubscription
+	var sub etf.Ref
 
 	fmt.Printf("\n=== Test GenStage\n")
 	fmt.Printf("Starting node: nodeGenStage01@localhost...")
@@ -86,17 +88,24 @@ func TestGenStage(t *testing.T) {
 	_, err = node1.Spawn("stageProducer1", ProcessOptions{}, producer, nil)
 	consumerProcess, err := node1.Spawn("stageConsumer1", ProcessOptions{}, consumer, nil)
 
+	consumer.SetDemandMode(GenStageDemandModeForward)
+
 	subOpts := GenStageSubscriptionOptions{
-		Mode: GenStageSubscriptionModeAuto,
+		Mode:      GenStageSubscriptionModeAuto,
+		MinDemand: 10,
+		MaxDemand: 20,
 	}
 	if sub, err = consumer.Subscribe(consumerProcess, "stageProducer1", subOpts); err != nil {
 		t.Fatal(err)
 	}
 
+	consumer.SetDemandMode(GenStageDemandModeForward)
+
 	consumer.sub = sub
 	producer.sub = sub
 
-	fmt.Println("OK")
+	time.Sleep(1 * time.Second)
+	fmt.Println("OKKK")
 
 	node1.Stop()
 }
