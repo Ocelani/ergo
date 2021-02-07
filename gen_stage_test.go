@@ -10,12 +10,12 @@ import (
 
 type GenStageProducerTest struct {
 	GenStage
-	sub etf.Ref
+	sub GenStageSubscription
 }
 
 type GenStageConsumerTest struct {
 	GenStage
-	sub etf.Ref
+	sub GenStageSubscription
 }
 
 // GenStage Producer
@@ -27,19 +27,21 @@ func (gs *GenStageProducerTest) InitStage(process *Process, args ...interface{})
 	return opts, nil
 }
 
-func (gs *GenStageProducerTest) HandleCancel(cancelReason etf.Term, from etf.Term, state interface{}) (string, etf.Term, interface{}) {
+func (gs *GenStageProducerTest) HandleCancel(subscription GenStageSubscription, cancelReason etf.Term, state interface{}) (string, etf.Term, interface{}) {
 	return "noreply", "subscription", state
 }
 
-func (gs *GenStageProducerTest) HandleDemand(demand uint64, state interface{}) (string, etf.Term, interface{}) {
-	return "noreply", 1, state
+func (gs *GenStageProducerTest) HandleDemand(subscription GenStageSubscription, demand uint, state interface{}) (string, []etf.Term, interface{}) {
+	return "noreply", nil, state
 }
 
-func (gs *GenStageProducerTest) HandleEvents(events interface{}, from etf.Term, state interface{}) (string, interface{}) {
+func (gs *GenStageProducerTest) HandleEvents(subscription GenStageSubscription, events []etf.Term, state interface{}) (string, interface{}) {
 	return "asdf", state
 }
 
-func (gs *GenStageProducerTest) HandleSubscribe(stageType GenStageType, options GenStageSubscriptionOptions, state interface{}) (GenStageSubscriptionMode, interface{}) {
+func (gs *GenStageProducerTest) HandleSubscribe(stageType GenStageType,
+	subscription GenStageSubscription, options GenStageSubscriptionOptions,
+	state interface{}) (GenStageSubscriptionMode, interface{}) {
 	fmt.Printf("got producer subs %#v %#v \n", stageType, options)
 	return GenStageSubscriptionModeAuto, state
 }
@@ -52,26 +54,28 @@ func (gs *GenStageConsumerTest) InitStage(process *Process, args ...interface{})
 	return opts, nil
 }
 
-func (gs *GenStageConsumerTest) HandleCancel(cancelReason etf.Term, from etf.Term, state interface{}) (string, etf.Term, interface{}) {
+func (gs *GenStageConsumerTest) HandleCancel(subscription GenStageSubscription, cancelReason etf.Term, state interface{}) (string, etf.Term, interface{}) {
 	return "noreply", "subscription", state
 }
 
-func (gs *GenStageConsumerTest) HandleDemand(demand uint64, state interface{}) (string, etf.Term, interface{}) {
-	return "noreply", 1, state
+func (gs *GenStageConsumerTest) HandleDemand(subscription GenStageSubscription, demand uint, state interface{}) (string, []etf.Term, interface{}) {
+	return "noreply", nil, state
 }
 
-func (gs *GenStageConsumerTest) HandleEvents(events interface{}, from etf.Term, state interface{}) (string, interface{}) {
+func (gs *GenStageConsumerTest) HandleEvents(subscription GenStageSubscription, events []etf.Term, state interface{}) (string, interface{}) {
 	return "asdf", state
 }
 
-func (gs *GenStageConsumerTest) HandleSubscribe(stageType GenStageType, options GenStageSubscriptionOptions, state interface{}) (GenStageSubscriptionMode, interface{}) {
+func (gs *GenStageConsumerTest) HandleSubscribe(stageType GenStageType,
+	subscription GenStageSubscription, options GenStageSubscriptionOptions,
+	state interface{}) (GenStageSubscriptionMode, interface{}) {
 	fmt.Printf("got consumer subs %#v %#v \n", stageType, options)
 	return GenStageSubscriptionModeAuto, state
 }
 
 func TestGenStage(t *testing.T) {
 	var err error
-	var sub etf.Ref
+	var sub GenStageSubscription
 
 	fmt.Printf("\n=== Test GenStage\n")
 	fmt.Printf("Starting node: nodeGenStage01@localhost...")
@@ -88,7 +92,7 @@ func TestGenStage(t *testing.T) {
 	_, err = node1.Spawn("stageProducer1", ProcessOptions{}, producer, nil)
 	consumerProcess, err := node1.Spawn("stageConsumer1", ProcessOptions{}, consumer, nil)
 
-	consumer.SetDemandMode(GenStageDemandModeForward)
+	consumer.SetDemandMode(consumerProcess, GenStageDemandModeForward)
 
 	subOpts := GenStageSubscriptionOptions{
 		Mode:      GenStageSubscriptionModeAuto,
@@ -98,8 +102,6 @@ func TestGenStage(t *testing.T) {
 	if sub, err = consumer.Subscribe(consumerProcess, "stageProducer1", subOpts); err != nil {
 		t.Fatal(err)
 	}
-
-	consumer.SetDemandMode(GenStageDemandModeForward)
 
 	consumer.sub = sub
 	producer.sub = sub

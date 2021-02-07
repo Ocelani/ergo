@@ -58,7 +58,7 @@ Here are the changes of latest release. For more details see the [ChangeLog](Cha
   there is example of usage `examples/nodetls/tlsGenServer.go`
 
 * Introduced [GenStage](https://hexdocs.pm/gen_stage/GenStage.html) behaviour implementation (originated from Elixir world).
-  `GenStage` is an abstraction built on top of GenServer to provide a simple way to create a distributed Producer/Consumer architecture, while automatically managing the concept of backpressure.
+  `GenStage` is an abstraction built on top of GenServer to provide a simple way to create a distributed Producer/Consumer architecture, while automatically managing the concept of backpressure. This implementaion is fully compatible with Elixir's GenStage.
 
   examples are here `examples/genstage`
 
@@ -225,10 +225,8 @@ func main() {
 
     process.Cast(process.Self(), "hey")
 
-    select {
-    case <-process.Context.Done():
-        fmt.Println("exited")
-    }
+    process.Wait()
+    fmt.Println("exited")
 }
 
 ```
