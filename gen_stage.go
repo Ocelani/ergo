@@ -177,11 +177,19 @@ type stageMessage struct {
 // This is useful as a synchronization mechanism, where the demand is accumulated until
 // all consumers are subscribed.
 func (gst *GenStage) SetDemandMode(p *Process, mode GenStageDemandMode) error {
-	_, err := p.Call(p.Self(), etf.Atom("$set_demand_mode"))
+	message := etf.Tuple{
+		etf.Atom("$set_demand_mode"),
+		etf.Tuple{p.Self(), etf.Ref{}},
+		etf.Tuple{etf.Atom("subscribe"), nil, nil},
+	}
+	_, err := p.Call(p.Self(), message)
 	return err
 }
 func (gst *GenStage) GetDemandMode(p *Process) (GenStageDemandMode, error) {
-	mode, err := p.Call(p.Self(), etf.Atom("$get_demand_mode"))
+	message := etf.Tuple{
+		etf.Atom("$get_demand_mode"),
+	}
+	mode, err := p.Call(p.Self(), message)
 	if err != nil {
 		return GenStageDemandModeForward, err
 	}
@@ -274,22 +282,29 @@ func (gs *GenStage) HandleCall(from etf.Tuple, message etf.Term, state interface
 	fmt.Println("Stage call")
 
 	object := state.(stateGenStage).p.object
+	newstate := state.(stateGenStage)
 	if err := etf.TermIntoStruct(message, &r); err != nil {
 		// it wasn't GenStage's message. pass it further
-		return object.(GenStageBehaviour).HandleGenStageCall(from, message, state)
+		reply, term, internal := object.(GenStageBehaviour).HandleGenStageCall(from, message, newstate.internal)
+		newstate.internal = internal
+		return reply, term, newstate
 	}
 
-	reply, err = handleRequest(r, state.(stateGenStage))
+	reply, err = handleRequest(r, &newstate)
 	switch err {
 	case nil:
-		return "reply", reply, state
+		return "reply", reply, newstate
 	case ErrStop:
 		return "stop", "normal", state
+	case ErrUnsupportedRequest:
+		reply, term, internal := object.(GenStageBehaviour).HandleGenStageCall(from, message, newstate.internal)
+		newstate.internal = internal
+		return reply, term, newstate
 	default:
 		return "stop", etf.Tuple{"error", err.Error()}, state
 	}
 
-	return "reply", reply, state
+	return "reply", reply, newstate
 }
 
 func (gs *GenStage) HandleCast(message etf.Term, state interface{}) (string, interface{}) {
@@ -299,16 +314,24 @@ func (gs *GenStage) HandleCast(message etf.Term, state interface{}) (string, int
 	fmt.Println("Stage cast")
 
 	object := state.(stateGenStage).p.object
+	newstate := state.(stateGenStage)
+
 	if err := etf.TermIntoStruct(message, &r); err != nil {
-		return object.(GenStageBehaviour).HandleGenStageCast(message, state)
+		reply, internal := object.(GenStageBehaviour).HandleGenStageCast(message, newstate.internal)
+		newstate.internal = internal
+		return reply, newstate
 	}
 
-	_, err = handleRequest(r, state.(stateGenStage))
+	_, err = handleRequest(r, &newstate)
 	switch err {
 	case nil:
-		return "noreply", state
+		return "noreply", newstate
 	case ErrStop:
 		return "stop", "normal"
+	case ErrUnsupportedRequest:
+		reply, internal := object.(GenStageBehaviour).HandleGenStageCast(message, newstate.internal)
+		newstate.internal = internal
+		return reply, newstate
 	default:
 		return "stop", err.Error()
 	}
@@ -344,17 +367,22 @@ func (gs *GenStage) HandleGenStageInfo(message etf.Term, state interface{}) (str
 
 // private functions
 
-func handleRequest(m stageMessage, state stateGenStage) (etf.Term, error) {
+func handleRequest(m stageMessage, state *stateGenStage) (etf.Term, error) {
 	switch m.Request {
 	case "$gen_consumer":
 		return handleConsumer(m.Subscription, m.Command, state)
 	case "$gen_producer":
 		return handleProducer(m.Subscription, m.Command, state)
+	case "$get_demand_mode":
+		return state.options.demand, nil
+	case "$set_demand_mode":
+		state.options.demand = "aaaaaa"
+		return "ok", nil
 	}
-	return nil, fmt.Errorf("unknown GenStage request")
+	return nil, ErrUnsupportedRequest
 }
 
-func handleConsumer(subscription GenStageSubscription, cmd stageRequestCommand, state stateGenStage) (etf.Term, error) {
+func handleConsumer(subscription GenStageSubscription, cmd stageRequestCommand, state *stateGenStage) (etf.Term, error) {
 	fmt.Printf("handleConsumer %#v\n", cmd)
 	var subscriptionOpts GenStageSubscriptionOptions
 	var subscriptionMode GenStageSubscriptionMode
@@ -390,7 +418,7 @@ func handleConsumer(subscription GenStageSubscription, cmd stageRequestCommand, 
 	return nil, fmt.Errorf("unknown GenStage command (HandleCast)")
 }
 
-func handleProducer(subscription GenStageSubscription, cmd stageRequestCommand, state stateGenStage) (etf.Term, error) {
+func handleProducer(subscription GenStageSubscription, cmd stageRequestCommand, state *stateGenStage) (etf.Term, error) {
 	fmt.Printf("handleProducer %#v\n", cmd)
 	var subscriptionOpts GenStageSubscriptionOptions
 	var subscriptionMode GenStageSubscriptionMode

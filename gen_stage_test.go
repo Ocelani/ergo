@@ -74,7 +74,6 @@ func (gs *GenStageConsumerTest) HandleSubscribe(stageType GenStageType,
 }
 
 func TestGenStage(t *testing.T) {
-	var err error
 	var sub GenStageSubscription
 
 	fmt.Printf("\n=== Test GenStage\n")
@@ -89,10 +88,13 @@ func TestGenStage(t *testing.T) {
 
 	producer := &GenStageProducerTest{}
 	consumer := &GenStageConsumerTest{}
-	_, err = node1.Spawn("stageProducer1", ProcessOptions{}, producer, nil)
+	producerProcess, err := node1.Spawn("stageProducer1", ProcessOptions{}, producer, nil)
 	consumerProcess, err := node1.Spawn("stageConsumer1", ProcessOptions{}, consumer, nil)
 
-	consumer.SetDemandMode(consumerProcess, GenStageDemandModeForward)
+	err = consumer.SetDemandMode(consumerProcess, GenStageDemandModeForward)
+	fmt.Println("XXXX1", err)
+	xxx, err := consumer.GetDemandMode(consumerProcess)
+	fmt.Println("XXXX", xxx, err)
 
 	subOpts := GenStageSubscriptionOptions{
 		Mode:      GenStageSubscriptionModeAuto,
@@ -102,6 +104,10 @@ func TestGenStage(t *testing.T) {
 	if sub, err = consumer.Subscribe(consumerProcess, "stageProducer1", subOpts); err != nil {
 		t.Fatal(err)
 	}
+
+	producerProcess.Call(consumerProcess.Self(), "test")
+	producerProcess.Cast(consumerProcess.Self(), "test")
+	producerProcess.Send(consumerProcess.Self(), "test")
 
 	consumer.sub = sub
 	producer.sub = sub
