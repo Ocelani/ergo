@@ -340,8 +340,11 @@ func (gs *GenStage) HandleCast(message etf.Term, state interface{}) (string, int
 }
 
 func (gs *GenStage) HandleInfo(message etf.Term, state interface{}) (string, interface{}) {
-	object := state.(stateGenStage).p.object
-	return object.(GenStageBehaviour).HandleGenStageInfo(message, state)
+	newstate := state.(stateGenStage)
+	object := newstate.p.object
+	reply, internal := object.(GenStageBehaviour).HandleGenStageInfo(message, newstate.internal)
+	newstate.internal = internal
+	return reply, newstate
 }
 
 func (gs *GenStage) Terminate(reason string, state interface{}) {
