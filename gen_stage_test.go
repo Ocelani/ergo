@@ -27,23 +27,23 @@ func (gs *GenStageProducerTest) InitStage(process *Process, args ...interface{})
 	return opts, nil
 }
 
-func (gs *GenStageProducerTest) HandleCancel(subscription GenStageSubscription, cancelReason etf.Term, state interface{}) (string, etf.Term, interface{}) {
-	return "noreply", "subscription", state
+func (gs *GenStageProducerTest) HandleCancel(subscription GenStageSubscription, cancelReason GenStageCancelReason, state interface{}) (error, interface{}) {
+	return nil, state
 }
 
-func (gs *GenStageProducerTest) HandleDemand(subscription GenStageSubscription, demand uint, state interface{}) (string, []etf.Term, interface{}) {
-	return "noreply", nil, state
+func (gs *GenStageProducerTest) HandleDemand(subscription GenStageSubscription, demand uint, state interface{}) (error, []etf.Term, interface{}) {
+	return nil, nil, state
 }
 
-func (gs *GenStageProducerTest) HandleEvents(subscription GenStageSubscription, events []etf.Term, state interface{}) (string, interface{}) {
-	return "asdf", state
+func (gs *GenStageProducerTest) HandleEvents(subscription GenStageSubscription, events []etf.Term, state interface{}) (error, interface{}) {
+	return nil, state
 }
 
 func (gs *GenStageProducerTest) HandleSubscribe(stageType GenStageType,
 	subscription GenStageSubscription, options GenStageSubscriptionOptions,
-	state interface{}) (GenStageSubscriptionMode, interface{}) {
+	state interface{}) (error, GenStageSubscriptionMode, interface{}) {
 	fmt.Printf("got producer subs %#v %#v \n", stageType, options)
-	return GenStageSubscriptionModeAuto, state
+	return nil, GenStageSubscriptionModeAuto, state
 }
 
 // GenStage Consumer
@@ -54,23 +54,23 @@ func (gs *GenStageConsumerTest) InitStage(process *Process, args ...interface{})
 	return opts, nil
 }
 
-func (gs *GenStageConsumerTest) HandleCancel(subscription GenStageSubscription, cancelReason etf.Term, state interface{}) (string, etf.Term, interface{}) {
-	return "noreply", "subscription", state
+func (gs *GenStageConsumerTest) HandleCancel(subscription GenStageSubscription, cancelReason GenStageCancelReason, state interface{}) (error, interface{}) {
+	return nil, state
 }
 
-func (gs *GenStageConsumerTest) HandleDemand(subscription GenStageSubscription, demand uint, state interface{}) (string, []etf.Term, interface{}) {
-	return "noreply", nil, state
+func (gs *GenStageConsumerTest) HandleDemand(subscription GenStageSubscription, demand uint, state interface{}) (error, []etf.Term, interface{}) {
+	return nil, nil, state
 }
 
-func (gs *GenStageConsumerTest) HandleEvents(subscription GenStageSubscription, events []etf.Term, state interface{}) (string, interface{}) {
-	return "asdf", state
+func (gs *GenStageConsumerTest) HandleEvents(subscription GenStageSubscription, events []etf.Term, state interface{}) (error, interface{}) {
+	return nil, state
 }
 
 func (gs *GenStageConsumerTest) HandleSubscribe(stageType GenStageType,
 	subscription GenStageSubscription, options GenStageSubscriptionOptions,
-	state interface{}) (GenStageSubscriptionMode, interface{}) {
+	state interface{}) (error, GenStageSubscriptionMode, interface{}) {
 	fmt.Printf("got consumer subs %#v %#v \n", stageType, options)
-	return GenStageSubscriptionModeAuto, state
+	return nil, GenStageSubscriptionModeAuto, state
 }
 
 func TestGenStage(t *testing.T) {
