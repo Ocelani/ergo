@@ -180,7 +180,7 @@ func (gst *GenStage) SetDemandMode(p *Process, mode GenStageDemandMode) error {
 	message := etf.Tuple{
 		etf.Atom("$set_demand_mode"),
 		etf.Tuple{p.Self(), etf.Ref{}},
-		etf.Tuple{etf.Atom("subscribe"), nil, nil},
+		etf.Tuple{etf.Atom(""), mode, nil},
 	}
 	_, err := p.Call(p.Self(), message)
 	return err
@@ -233,16 +233,21 @@ func (gst *GenStage) Subscribe(p *Process, to etf.Term, opts GenStageSubscriptio
 		return subscription, err
 	}
 
-	msg[0] = etf.Atom("$gen_consumer")
+	msg = etf.Tuple{
+		etf.Atom("$gen_consumer"),
+		etf.Tuple{p.Self(), subscription_id},
+		etf.Tuple{etf.Atom("subscribed"), to, subscribe_opts},
+	}
 	p.Cast(p.Self(), msg)
 
 	return subscription, nil
 }
 
-func (gst *GenStage) Ask(subscription GenStageSubscription, demand uint) error {
+func (gst *GenStage) Ask(p *Process, subscription GenStageSubscription, demand uint) error {
 	if demand == 0 {
 		return nil
 	}
+
 	return nil
 }
 
@@ -379,7 +384,11 @@ func handleRequest(m stageMessage, state *stateGenStage) (etf.Term, error) {
 	case "$get_demand_mode":
 		return state.options.demand, nil
 	case "$set_demand_mode":
-		state.options.demand = "aaaaaa"
+		mode, ok := m.Command.Opt1.(GenStageDemandMode)
+		if !ok {
+			return nil, fmt.Errorf("wrong value for $set_demand_mode")
+		}
+		state.options.demand = mode
 		return "ok", nil
 	}
 	return nil, ErrUnsupportedRequest
@@ -392,8 +401,8 @@ func handleConsumer(subscription GenStageSubscription, cmd stageRequestCommand, 
 	var err error
 
 	switch cmd.Cmd {
-	case etf.Atom("subscribe"):
-		// receive this message as a confirmation of subscription
+	case etf.Atom("subscribed"):
+		// confirmed subscription
 		if state.options.stageType == GenStageTypeProducer {
 			err := fmt.Errorf("GenStage with type GenStageTypeProducer cannot act as a consumer stage")
 			return nil, err

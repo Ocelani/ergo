@@ -70,7 +70,7 @@ func (gs *GenStageConsumerTest) HandleSubscribe(stageType GenStageType,
 	subscription GenStageSubscription, options GenStageSubscriptionOptions,
 	state interface{}) (error, GenStageSubscriptionMode, interface{}) {
 	fmt.Printf("got consumer subs %#v %#v \n", stageType, options)
-	return nil, GenStageSubscriptionModeAuto, state
+	return nil, GenStageSubscriptionModeManual, state
 }
 
 func TestGenStage(t *testing.T) {
