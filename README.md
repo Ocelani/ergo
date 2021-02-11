@@ -298,6 +298,7 @@ Now golang' profiler is available at `http://localhost:9009/debug/pprof`
 
 [![Kaspersky](./.images/kaspersky.png)](https://kaspersky.com)
 [![RingCentral](./.images/ringcentral.png)](https://www.ringcentral.com)
+[![LilithGames](./.images/lilithgames.png)](https://lilithgames.com)
 
 is your company using Ergo? add your company logo/name here
 
