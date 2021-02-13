@@ -20,10 +20,7 @@ type GenStageConsumerTest struct {
 
 // GenStage Producer
 func (gs *GenStageProducerTest) InitStage(process *Process, args ...interface{}) (GenStageOptions, interface{}) {
-	opts := GenStageOptions{
-		stageType: GenStageTypeProducer,
-		demand:    GenStageDemandModeForward,
-	}
+	opts := GenStageOptions{}
 	return opts, nil
 }
 
@@ -39,18 +36,14 @@ func (gs *GenStageProducerTest) HandleEvents(subscription GenStageSubscription, 
 	return nil, state
 }
 
-func (gs *GenStageProducerTest) HandleSubscribe(stageType GenStageType,
-	subscription GenStageSubscription, options GenStageSubscriptionOptions,
-	state interface{}) (error, GenStageSubscriptionMode, interface{}) {
-	fmt.Printf("got producer subs %#v %#v \n", stageType, options)
-	return nil, GenStageSubscriptionModeAuto, state
+func (gs *GenStageProducerTest) HandleSubscribe(subscription GenStageSubscription, options GenStageSubscribeOptions, state interface{}) (error, interface{}) {
+	fmt.Printf("got producer subs %#v \n", options)
+	return nil, state
 }
 
 // GenStage Consumer
 func (gs *GenStageConsumerTest) InitStage(process *Process, args ...interface{}) (GenStageOptions, interface{}) {
-	opts := GenStageOptions{
-		stageType: GenStageTypeConsumer,
-	}
+	opts := GenStageOptions{}
 	return opts, nil
 }
 
@@ -66,11 +59,9 @@ func (gs *GenStageConsumerTest) HandleEvents(subscription GenStageSubscription, 
 	return nil, state
 }
 
-func (gs *GenStageConsumerTest) HandleSubscribe(stageType GenStageType,
-	subscription GenStageSubscription, options GenStageSubscriptionOptions,
-	state interface{}) (error, GenStageSubscriptionMode, interface{}) {
-	fmt.Printf("got consumer subs %#v %#v \n", stageType, options)
-	return nil, GenStageSubscriptionModeManual, state
+func (gs *GenStageConsumerTest) HandleSubscribed(subscription GenStageSubscription, state interface{}) (error, bool, interface{}) {
+	fmt.Printf("got consumer subs %#v \n", subscription)
+	return nil, false, state
 }
 
 func TestGenStage(t *testing.T) {
@@ -91,13 +82,7 @@ func TestGenStage(t *testing.T) {
 	producerProcess, err := node1.Spawn("stageProducer1", ProcessOptions{}, producer, nil)
 	consumerProcess, err := node1.Spawn("stageConsumer1", ProcessOptions{}, consumer, nil)
 
-	err = consumer.SetDemandMode(consumerProcess, GenStageDemandModeForward)
-	fmt.Println("XXXX1", err)
-	xxx, err := consumer.GetDemandMode(consumerProcess)
-	fmt.Println("XXXX", xxx, err)
-
-	subOpts := GenStageSubscriptionOptions{
-		Mode:      GenStageSubscriptionModeAuto,
+	subOpts := GenStageSubscribeOptions{
 		MinDemand: 10,
 		MaxDemand: 20,
 	}

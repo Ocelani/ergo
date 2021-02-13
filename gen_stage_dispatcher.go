@@ -20,7 +20,7 @@ type GenStageDispatcherBehaviour interface {
 	Dispatch(events string, length int, state interface{}) interface{}
 
 	// Subscribe called every time the producer gets a new subscriber
-	Subscribe(subscription GenStageSubscription, opts GenStageSubscriptionOptions, state interface{}) interface{}
+	Subscribe(subscription GenStageSubscription, opts GenStageSubscribeOptions, state interface{}) interface{}
 }
 
 type GenStageDispatcher int
@@ -84,7 +84,7 @@ func (dd *dispatcherDemand) Dispatch(events string, length int, state interface{
 	return state
 }
 
-func (dd *dispatcherDemand) Subscribe(subscription GenStageSubscription, opts GenStageSubscriptionOptions, state interface{}) interface{} {
+func (dd *dispatcherDemand) Subscribe(subscription GenStageSubscription, opts GenStageSubscribeOptions, state interface{}) interface{} {
 	return state
 }
 
@@ -106,7 +106,7 @@ func (db *dispatcherBroadcast) Dispatch(events string, length int, state interfa
 	return state
 }
 
-func (db *dispatcherBroadcast) Subscribe(subscription GenStageSubscription, opts GenStageSubscriptionOptions, state interface{}) interface{} {
+func (db *dispatcherBroadcast) Subscribe(subscription GenStageSubscription, opts GenStageSubscribeOptions, state interface{}) interface{} {
 	return state
 }
 
@@ -128,6 +128,6 @@ func (dp *dispatcherPartition) Dispatch(events string, length int, state interfa
 	return state
 }
 
-func (dp *dispatcherPartition) Subscribe(subscription GenStageSubscription, opts GenStageSubscriptionOptions, state interface{}) interface{} {
+func (dp *dispatcherPartition) Subscribe(subscription GenStageSubscription, opts GenStageSubscribeOptions, state interface{}) interface{} {
 	return state
 }
