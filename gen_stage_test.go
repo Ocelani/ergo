@@ -24,10 +24,6 @@ func (gs *GenStageProducerTest) InitStage(process *Process, args ...interface{})
 	return opts, nil
 }
 
-func (gs *GenStageProducerTest) HandleCancel(subscription GenStageSubscription, cancelReason GenStageCancelReason, state interface{}) (error, interface{}) {
-	return nil, state
-}
-
 func (gs *GenStageProducerTest) HandleDemand(subscription GenStageSubscription, demand uint, state interface{}) (error, []etf.Term, interface{}) {
 	return nil, nil, state
 }
@@ -45,10 +41,6 @@ func (gs *GenStageProducerTest) HandleSubscribe(subscription GenStageSubscriptio
 func (gs *GenStageConsumerTest) InitStage(process *Process, args ...interface{}) (GenStageOptions, interface{}) {
 	opts := GenStageOptions{}
 	return opts, nil
-}
-
-func (gs *GenStageConsumerTest) HandleCancel(subscription GenStageSubscription, cancelReason GenStageCancelReason, state interface{}) (error, interface{}) {
-	return nil, state
 }
 
 func (gs *GenStageConsumerTest) HandleDemand(subscription GenStageSubscription, demand uint, state interface{}) (error, []etf.Term, interface{}) {

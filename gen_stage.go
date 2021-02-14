@@ -24,7 +24,7 @@ type GenStageOptions struct {
 	// the demand is always forwarded to the HandleDemand callback.
 	// When this options is set to 'true', demands are accumulated until mode is
 	// set back to 'false' via DisableDemandAccumulating method
-	accumulate bool
+	disableForwarding bool
 
 	// bufferSize the size of the buffer to store events without demand.
 	// default is 10000
@@ -46,17 +46,8 @@ const (
 
 type GenStageBehaviour interface {
 
-	// InitStage(...) -> (GenStageOptions, state)
+	// InitStage
 	InitStage(process *Process, args ...interface{}) (GenStageOptions, interface{})
-
-	// HandleCancel
-	// Invoked when a consumer is no longer subscribed to a producer.
-	// The cancelReason will be a {Cancel: "cancel", Reason: _} if the reason for cancellation
-	// was a GenStage.Cancel call. Any other value means the cancellation reason was
-	// due to an EXIT.
-	// Use `ergo.ErrStop` as an error for the normal shutdown this process. Any other error values
-	// will be used as a reason for the abnornal shutdown process.
-	HandleCancel(subscription GenStageSubscription, cancelReason GenStageCancelReason, state interface{}) (error, interface{})
 
 	// HandleDemand this callback is invoked on GenStageTypeProducer/GenStageTypeProducerConsumer.
 	// The producer that implements this callback must either store the demand, or return the amount of requested events.
@@ -83,6 +74,23 @@ type GenStageBehaviour interface {
 	//     means that demand must be sent to producers explicitly via Ask method.
 	//     this kind of subscription must be canceled when HandleCancel is called
 	HandleSubscribed(subscription GenStageSubscription, state interface{}) (error, bool, interface{})
+
+	// HandleCancel
+	// Invoked when a consumer is no longer subscribed to a producer (invoked on a producer)
+	// The cancelReason will be a {Cancel: "cancel", Reason: _} if the reason for cancellation
+	// was a GenStage.Cancel call. Any other value means the cancellation reason was
+	// due to an EXIT.
+	// Use `ergo.ErrStop` as an error for the normal shutdown this process. Any other error values
+	// will be used as a reason for the abnornal shutdown process.
+	HandleCancel(subscription GenStageSubscription, reason string, state interface{}) (error, interface{})
+
+	// HandleCanceled
+	// Invoked when a consumer is no longer subscribed to a producer (invoked on a consumer)
+	// Termination this stage depends on a cancel mode for the given subscription. For the cancel mode
+	// GenStageCancelPermanent - this stage will be terminated right after this callback invoking.
+	// For the cancel mode GenStageCancelTransient - it depends on a reason of subscription canceling.
+	// Cancel mode GenStageCancelTemporary keeps this stage alive whether the reason could be.
+	HandleCanceled(subscription GenStageSubscription, reason string, state interface{}) (error, interface{})
 
 	// HandleGenStageCall this callback is invoked on Process.Call. This method is optional
 	// for the implementation
@@ -130,9 +138,10 @@ type GenStage struct {
 }
 
 type stateGenStage struct {
-	p        *Process
-	internal interface{}
-	options  GenStageOptions
+	p            *Process
+	internal     interface{}
+	options      GenStageOptions
+	demandBuffer []demandRequest
 }
 
 type stageRequestCommandCancel struct {
@@ -175,24 +184,30 @@ type doSubscribe struct {
 	options GenStageSubscribeOptions
 }
 
-//
-// GenStage' object methods
-//
+type setForwardDemand struct {
+	forward bool
+}
 
-// SetDemandMode Sets the demand mode for a producer
-// When DemandModeForward (by default), the demand is always forwarded to the HandleDemand callback.
-// When DemandModeAccumulate, demand is accumulated until its mode is set to DemandModeForward.
-// This is useful as a synchronization mechanism, where the demand is accumulated until
-// all consumers are subscribed.
-func (gst *GenStage) EnableManualDemand(p *Process, subscription GenStageSubscription) error {
+type demandRequest struct {
+	subscription GenStageSubscription
+	demand       uint
+}
+
+// GenStage methods
+
+// DisableAutoDemand means that demand must be sent to producers explicitly via Ask method. This
+// mode can be used when a special behaviour is desired.
+func (gst *GenStage) DisableAutoDemand(p *Process, subscription GenStageSubscription) error {
 	message := setManualDemand{
 		subscription: subscription,
-		enable:       true,
+		enable:       false,
 	}
 	_, err := p.Call(p.Self(), message)
 	return err
 }
-func (gst *GenStage) DisableManualDemand(p *Process, subscription GenStageSubscription) error {
+
+// EnableAutoDemand enables auto demand mode (this is default mode for the consumer).
+func (gst *GenStage) EnableAutoDemand(p *Process, subscription GenStageSubscription) error {
 	if p == nil {
 		return fmt.Errorf("Subscription error. Process can not be nil")
 	}
@@ -203,6 +218,32 @@ func (gst *GenStage) DisableManualDemand(p *Process, subscription GenStageSubscr
 	_, err := p.Call(p.Self(), message)
 	return err
 }
+
+// EnableForwardDemand enables forwarding messages to the HandleDemand on a producer stage.
+// This is default mode for the producer.
+func (gst *GenStage) EnableForwardDemand(p *Process) error {
+	message := setForwardDemand{
+		forward: true,
+	}
+	_, err := p.Call(p.Self(), message)
+	return err
+}
+
+// DisableForwardDemand disables forwarding messages to the HandleDemand on a producer stage.
+// This is useful as a synchronization mechanism, where the demand is accumulated until
+// all consumers are subscribed.
+func (gst *GenStage) DisableForwardDemand(p *Process) error {
+	message := setForwardDemand{
+		forward: false,
+	}
+	_, err := p.Call(p.Self(), message)
+	return err
+}
+
+// SetCancelMode defines how consumer will handle termination of the producer. There are 3 modes:
+// GenStageCancelPermanent (default) - consumer exits when the producer cancels or exits
+// GenStageCancelTransient - consumer exits only if reason is not normal, shutdown, or {shutdown, reason}
+// GenStageCancelTemporary - never exits
 func (gst *GenStage) SetCancelMode(p *Process, subscription GenStageSubscription, cancel GenStageCancelMode) error {
 	if p == nil {
 		return fmt.Errorf("Subscription error. Process can not be nil")
@@ -215,6 +256,7 @@ func (gst *GenStage) SetCancelMode(p *Process, subscription GenStageSubscription
 	return err
 }
 
+// Subscribe subscribes to the given producer. HandleSubscribed callback will be invoked on a consumer stage once a request for the subscription is sent. If something went wrong on a producer side the callback HandleCancel will be invoked with a reason of cancelation.
 func (gst *GenStage) Subscribe(p *Process, to etf.Term, opts GenStageSubscribeOptions) (GenStageSubscription, error) {
 	var subscription GenStageSubscription
 	if p == nil {
@@ -246,7 +288,7 @@ func (gst *GenStage) Subscribe(p *Process, to etf.Term, opts GenStageSubscribeOp
 	// In order to get rid of race condition we should send this message
 	// before we send 'subscribe' to the producer process. Just
 	// to make sure if we registered this subscription before the 'DOWN'
-	// or 'EXIT' message arrived if something weng wrong.
+	// or 'EXIT' message arrived if something went wrong.
 	msg := etf.Tuple{
 		etf.Atom("$gen_consumer"),
 		etf.Tuple{p.Self(), subscription_id},
@@ -264,6 +306,8 @@ func (gst *GenStage) Subscribe(p *Process, to etf.Term, opts GenStageSubscribeOp
 	return subscription, nil
 }
 
+// Ask makes a demand request for the given subscription. This function must only be
+// used in the cases when a consumer sets a subscription to manual mode via DisableAutoDemand
 func (gst *GenStage) Ask(p *Process, subscription GenStageSubscription, demand uint) error {
 	if demand == 0 {
 		return nil
@@ -272,7 +316,8 @@ func (gst *GenStage) Ask(p *Process, subscription GenStageSubscription, demand u
 	return nil
 }
 
-func (gst *GenStage) Cancel(subscription etf.Ref) error {
+// Cancel
+func (gst *GenStage) Cancel(subscription etf.Ref, reason string) error {
 	return nil
 }
 
@@ -311,12 +356,17 @@ func (gs *GenStage) HandleCall(from etf.Tuple, message etf.Term, state interface
 		// m.cancel
 		return "reply", "ok", newstate
 
+	case setForwardDemand:
+		// m.forward
+		// disableForwarding = !m.forward
+
 	default:
 		reply, term, internal := object.(GenStageBehaviour).HandleGenStageCall(from, message, newstate.internal)
 		newstate.internal = internal
 		return reply, term, newstate
 	}
 
+	return "reply", "ok", newstate
 }
 
 func (gs *GenStage) HandleCast(message etf.Term, state interface{}) (string, interface{}) {
@@ -410,6 +460,16 @@ func (gs *GenStage) HandleSubscribed(subscription GenStageSubscription, state in
 	return nil, false, newstate
 }
 
+func (gs *GenStage) HandleCancel(subscription GenStageSubscription, reason string, state interface{}) (error, interface{}) {
+	// default callback if it wasn't implemented
+	return nil, state
+}
+
+func (gs *GenStage) HandleCanceled(subscription GenStageSubscription, reason string, state interface{}) (error, interface{}) {
+	// default callback if it wasn't implemented
+	return nil, state
+}
+
 func (gs *GenStage) HandleEvents(subscription GenStageSubscription, events []etf.Term, state interface{}) (error, interface{}) {
 	fmt.Printf("GenStage HandleEvents: unhandled subscription (%#v) events %#v\n", subscription, events)
 	return nil, state
@@ -487,6 +547,18 @@ func handleProducer(subscription GenStageSubscription, cmd stageRequestCommand, 
 		demand, ok := cmd.Opt1.(uint)
 		if !ok {
 			return nil, fmt.Errorf("Demand has wrong value. Expected uint")
+		}
+
+		if state.options.disableForwarding {
+			d := demandRequest{
+				subscription: subscription,
+				demand:       demand,
+			}
+			// FIXME it would be more effective to use sync.Pool with
+			// preallocated array behind the slice.
+			// see how it was made in lib.TakeBuffer
+			state.demandBuffer = append(state.demandBuffer, d)
+			return etf.Atom("ok"), nil
 		}
 
 		object := state.p.object
