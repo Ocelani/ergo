@@ -32,10 +32,10 @@ func (gs *GenStageProducerTest) HandleEvents(subscription GenStageSubscription, 
 	return nil, state
 }
 
-func (gs *GenStageProducerTest) HandleSubscribe(subscription GenStageSubscription, options GenStageSubscribeOptions, state interface{}) (error, interface{}) {
-	fmt.Printf("got producer subs %#v \n", options)
-	return nil, state
-}
+//func (gs *GenStageProducerTest) HandleSubscribe(subscription GenStageSubscription, options GenStageSubscribeOptions, state interface{}) (error, interface{}) {
+//	fmt.Printf("got producer subs %#v \n", options)
+//	return nil, state
+//}
 
 // GenStage Consumer
 func (gs *GenStageConsumerTest) InitStage(process *Process, args ...interface{}) (GenStageOptions, interface{}) {
@@ -54,6 +54,10 @@ func (gs *GenStageConsumerTest) HandleEvents(subscription GenStageSubscription, 
 func (gs *GenStageConsumerTest) HandleSubscribed(subscription GenStageSubscription, state interface{}) (error, bool, interface{}) {
 	fmt.Printf("got consumer subs %#v \n", subscription)
 	return nil, false, state
+}
+func (gs *GenStageConsumerTest) HandleCanceled(subscription GenStageSubscription, reason string, state interface{}) (error, interface{}) {
+	fmt.Printf("consumer got cancel %#v \n", subscription)
+	return nil, state
 }
 
 func TestGenStage(t *testing.T) {
