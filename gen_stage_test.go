@@ -10,63 +10,33 @@ import (
 
 type GenStageProducerTest struct {
 	GenStage
-	sub GenStageSubscription
 }
 
 type GenStageConsumerTest struct {
 	GenStage
-	sub GenStageSubscription
 }
 
-// GenStage Producer
-func (gs *GenStageProducerTest) InitStage(process *Process, args ...interface{}) (GenStageOptions, interface{}) {
-	opts := GenStageOptions{}
-	return opts, nil
-}
-
+// a simple GenStage Producer
 func (gs *GenStageProducerTest) HandleDemand(subscription GenStageSubscription, demand uint, state interface{}) (error, []etf.Term, interface{}) {
 	return nil, nil, state
 }
 
-func (gs *GenStageProducerTest) HandleEvents(subscription GenStageSubscription, events []etf.Term, state interface{}) (error, interface{}) {
+func (gs *GenStageProducerTest) HandleSubscribe(subscription GenStageSubscription, options GenStageSubscribeOptions, state interface{}) (error, interface{}) {
+	fmt.Printf("got producer subs %#v \n", options)
 	return nil, state
 }
 
-//func (gs *GenStageProducerTest) HandleSubscribe(subscription GenStageSubscription, options GenStageSubscribeOptions, state interface{}) (error, interface{}) {
-//	fmt.Printf("got producer subs %#v \n", options)
-//	return nil, state
-//}
-
-// GenStage Consumer
-func (gs *GenStageConsumerTest) InitStage(process *Process, args ...interface{}) (GenStageOptions, interface{}) {
-	opts := GenStageOptions{}
-	return opts, nil
-}
-
-func (gs *GenStageConsumerTest) HandleDemand(subscription GenStageSubscription, demand uint, state interface{}) (error, []etf.Term, interface{}) {
-	return nil, nil, state
-}
-
+// a simple GenStage Consumer
 func (gs *GenStageConsumerTest) HandleEvents(subscription GenStageSubscription, events []etf.Term, state interface{}) (error, interface{}) {
 	return nil, state
 }
 
-func (gs *GenStageConsumerTest) HandleSubscribed(subscription GenStageSubscription, state interface{}) (error, bool, interface{}) {
-	fmt.Printf("got consumer subs %#v \n", subscription)
-	return nil, false, state
-}
-func (gs *GenStageConsumerTest) HandleCanceled(subscription GenStageSubscription, reason string, state interface{}) (error, interface{}) {
-	fmt.Printf("consumer got cancel %#v \n", subscription)
-	return nil, state
-}
+func TestGenStageSimple(t *testing.T) {
 
-func TestGenStage(t *testing.T) {
-	var sub GenStageSubscription
+	fmt.Printf("\n=== Test GenStageSimple\n")
+	fmt.Printf("Starting node: nodeGenStageSimple01@localhost...")
 
-	fmt.Printf("\n=== Test GenStage\n")
-	fmt.Printf("Starting node: nodeGenStage01@localhost...")
-
-	node1 := CreateNode("nodeGenStage01@localhost", "cookies", NodeOptions{})
+	node1 := CreateNode("nodeGenStageSimple01@localhost", "cookies", NodeOptions{})
 
 	if node1 == nil {
 		t.Fatal("can't start node")
@@ -75,23 +45,18 @@ func TestGenStage(t *testing.T) {
 
 	producer := &GenStageProducerTest{}
 	consumer := &GenStageConsumerTest{}
-	producerProcess, err := node1.Spawn("stageProducer1", ProcessOptions{}, producer, nil)
-	consumerProcess, err := node1.Spawn("stageConsumer1", ProcessOptions{}, consumer, nil)
+	node1.Spawn("stageProducer", ProcessOptions{}, producer, nil)
+	consumer1Process, _ := node1.Spawn("stageConsumer1", ProcessOptions{}, consumer, nil)
+	consumer2Process, _ := node1.Spawn("stageConsumer2", ProcessOptions{}, consumer, nil)
+	consumer3Process, _ := node1.Spawn("stageConsumer3", ProcessOptions{}, consumer, nil)
 
 	subOpts := GenStageSubscribeOptions{
 		MinDemand: 10,
 		MaxDemand: 20,
 	}
-	if sub, err = consumer.Subscribe(consumerProcess, "stageProducer1", subOpts); err != nil {
-		t.Fatal(err)
-	}
-
-	producerProcess.Call(consumerProcess.Self(), "test")
-	producerProcess.Cast(consumerProcess.Self(), "test")
-	producerProcess.Send(consumerProcess.Self(), "test")
-
-	consumer.sub = sub
-	producer.sub = sub
+	consumer.Subscribe(consumer1Process, "stageProducer", subOpts)
+	consumer.Subscribe(consumer2Process, "stageProducer", subOpts)
+	consumer.Subscribe(consumer3Process, "stageProducer", subOpts)
 
 	time.Sleep(1 * time.Second)
 	fmt.Println("OKKK")

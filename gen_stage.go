@@ -111,6 +111,11 @@ type GenStageSubscription struct {
 	Ref etf.Ref
 }
 
+type subscriptionInternal struct {
+	Ref     etf.Ref
+	Monitor etf.Ref
+}
+
 type GenStageSubscribeTo struct {
 	producer etf.Term
 	options  GenStageSubscribeOptions
@@ -147,9 +152,9 @@ type stateGenStage struct {
 	demandBuffer    []demandRequest
 	dispatcherState interface{}
 	// keep our subscriptions
-	producers map[etf.Pid]etf.Ref
+	producers map[etf.Pid]subscriptionInternal
 	// keep our subscribers
-	consumers map[etf.Pid]etf.Ref
+	consumers map[etf.Pid]subscriptionInternal
 	// in order to handle DOWN messages we should be able
 	// to get the subscription by the ref
 	ref2pid map[string]etf.Pid
@@ -299,7 +304,7 @@ func (gst *GenStage) Subscribe(p *Process, to etf.Term, opts GenStageSubscribeOp
 	// In order to get rid of race condition we should send this message
 	// before we send 'subscribe' to the producer process. Just
 	// to make sure if we registered this subscription before the 'DOWN'
-	// or 'EXIT' message arrived if something went wrong.
+	// or 'EXIT' message arrived in case of something went wrong.
 	msg := etf.Tuple{
 		etf.Atom("$gen_consumer"),
 		etf.Tuple{p.Self(), subscription_id},
@@ -337,7 +342,10 @@ func (gst *GenStage) Cancel(subscription etf.Ref, reason string) error {
 //
 func (gs *GenStage) Init(p *Process, args ...interface{}) interface{} {
 	//var stageOptions GenStageOptions
-	state := &stateGenStage{}
+	state := &stateGenStage{
+		producers: map[etf.Pid]subscriptionInternal{},
+		consumers: map[etf.Pid]subscriptionInternal{},
+	}
 
 	state.p = p
 	state.options, state.internal = p.object.(GenStageBehaviour).InitStage(p, args)
@@ -402,7 +410,7 @@ func (gs *GenStage) HandleInfo(message etf.Term, state interface{}) (string, int
 	// {DOWN, Ref, process, PidOrName, Reason}
 	if err := etf.TermIntoStruct(message, &d); err == nil && d.Down == etf.Atom("DOWN") {
 
-		// send to itself Cancel message
+		// send Cancel message to itself
 		return "noreply", state
 	}
 
@@ -436,6 +444,12 @@ func (gs *GenStage) Terminate(reason string, state interface{}) {
 }
 
 // default callbacks
+
+func (gs *GenStage) InitStage(process *Process, args ...interface{}) (GenStageOptions, interface{}) {
+	// GenStage initialization with default options
+	opts := GenStageOptions{}
+	return opts, nil
+}
 
 func (gs *GenStage) HandleGenStageCall(from etf.Tuple, message etf.Term, state interface{}) (string, etf.Term, interface{}) {
 	// default callback if it wasn't implemented
@@ -565,6 +579,25 @@ func handleProducer(subscription GenStageSubscription, cmd stageRequestCommand, 
 
 		switch err {
 		case nil:
+			// cancel current subscription if this consumer already has subscription
+			if ref, ok := state.consumers[subscription.Pid]; ok {
+				msg := etf.Tuple{
+					etf.Atom("$gen_consumer"),
+					etf.Tuple{subscription.Pid, ref},
+					etf.Tuple{etf.Atom("cancel"), "resubscribed"},
+				}
+				state.p.Send(subscription.Pid, msg)
+
+			}
+
+			// monitor subscriber in order to remove this subscription
+			// if it terminated unexpectedly
+			m := state.p.MonitorProcess(subscription.Pid)
+			s := subscriptionInternal{
+				Ref:     subscription.Ref,
+				Monitor: m,
+			}
+			state.consumers[subscription.Pid] = s
 			return etf.Atom("ok"), nil
 
 		case ErrNotAProducer:
@@ -578,6 +611,7 @@ func handleProducer(subscription GenStageSubscription, cmd stageRequestCommand, 
 			return etf.Atom("ok"), nil
 
 		default:
+			// any other error should terminate this stage
 			return nil, err
 		}
 
