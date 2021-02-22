@@ -17,7 +17,7 @@ type GenStageConsumerTest struct {
 }
 
 // a simple GenStage Producer
-func (gs *GenStageProducerTest) HandleDemand(subscription GenStageSubscription, demand uint, state interface{}) (error, []etf.Term, interface{}) {
+func (gs *GenStageProducerTest) HandleDemand(subscription GenStageSubscription, demand uint, state interface{}) (error, etf.List, interface{}) {
 	return nil, nil, state
 }
 
@@ -27,7 +27,7 @@ func (gs *GenStageProducerTest) HandleSubscribe(subscription GenStageSubscriptio
 }
 
 // a simple GenStage Consumer
-func (gs *GenStageConsumerTest) HandleEvents(subscription GenStageSubscription, events []etf.Term, state interface{}) (error, interface{}) {
+func (gs *GenStageConsumerTest) HandleEvents(subscription GenStageSubscription, events etf.List, state interface{}) (error, interface{}) {
 	return nil, state
 }
 
@@ -56,6 +56,7 @@ func TestGenStageSimple(t *testing.T) {
 	}
 	consumer.Subscribe(consumer1Process, "stageProducer", subOpts)
 	consumer.Subscribe(consumer2Process, "stageProducer", subOpts)
+	consumer.Subscribe(consumer3Process, "stageProducer", subOpts)
 	consumer.Subscribe(consumer3Process, "stageProducer", subOpts)
 
 	time.Sleep(1 * time.Second)

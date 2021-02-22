@@ -56,12 +56,12 @@ type GenStageBehaviour interface {
 	// The producer that implements this callback must either store the demand, or return the amount of requested events.
 	// Use `ergo.ErrStop` as an error for the normal shutdown this process. Any other error values
 	// will be used as a reason for the abnornal shutdown process.
-	HandleDemand(subscription GenStageSubscription, demand uint, state interface{}) (error, []etf.Term, interface{})
+	HandleDemand(subscription GenStageSubscription, demand uint, state interface{}) (error, etf.List, interface{})
 
 	// HandleEvents this callback is invoked on a consumer stage.
 	// Use `ergo.ErrStop` as an error for the normal shutdown this process. Any other error values
 	// will be used as a reason for the abnornal shutdown process.
-	HandleEvents(subscription GenStageSubscription, events []etf.Term, state interface{}) (error, interface{})
+	HandleEvents(subscription GenStageSubscription, events etf.List, state interface{}) (error, interface{})
 
 	// HandleSubscribe This callback is invoked on a producer stage.
 	// Use `ergo.ErrStop` as an error for the normal shutdown this process. Any other error values
@@ -152,12 +152,10 @@ type stateGenStage struct {
 	demandBuffer    []demandRequest
 	dispatcherState interface{}
 	// keep our subscriptions
-	producers map[etf.Pid]subscriptionInternal
+	// key: string representation of etf.Ref (monitor)
+	producers map[string]subscriptionInternal
 	// keep our subscribers
 	consumers map[etf.Pid]subscriptionInternal
-	// in order to handle DOWN messages we should be able
-	// to get the subscription by the ref
-	ref2pid map[string]etf.Pid
 }
 
 type stageRequestCommandCancel struct {
@@ -209,6 +207,10 @@ type demandRequest struct {
 	demand       uint
 }
 
+type sendEvents struct {
+	events etf.List
+}
+
 // GenStage methods
 
 // DisableAutoDemand means that demand must be sent to producers explicitly via Ask method. This
@@ -256,6 +258,15 @@ func (gst *GenStage) DisableForwardDemand(p *Process) error {
 	return err
 }
 
+// SendEvents sends events for the subscribers
+func (gst *GenStage) SendEvents(p *Process, events etf.List) error {
+	message := sendEvents{
+		events: events,
+	}
+	_, err := p.Call(p.Self(), message)
+	return err
+}
+
 // SetCancelMode defines how consumer will handle termination of the producer. There are 3 modes:
 // GenStageCancelPermanent (default) - consumer exits when the producer cancels or exits
 // GenStageCancelTransient - consumer exits only if reason is not normal, shutdown, or {shutdown, reason}
@@ -273,7 +284,7 @@ func (gst *GenStage) SetCancelMode(p *Process, subscription GenStageSubscription
 }
 
 // Subscribe subscribes to the given producer. HandleSubscribed callback will be invoked on a consumer stage once a request for the subscription is sent. If something went wrong on a producer side the callback HandleCancel will be invoked with a reason of cancelation.
-func (gst *GenStage) Subscribe(p *Process, to etf.Term, opts GenStageSubscribeOptions) (GenStageSubscription, error) {
+func (gst *GenStage) Subscribe(p *Process, producer etf.Term, opts GenStageSubscribeOptions) (GenStageSubscription, error) {
 	var subscription GenStageSubscription
 	if p == nil {
 		return subscription, fmt.Errorf("Subscription error. Process can not be nil")
@@ -282,7 +293,7 @@ func (gst *GenStage) Subscribe(p *Process, to etf.Term, opts GenStageSubscribeOp
 		return subscription, fmt.Errorf("Subscription error. Process should be alive")
 	}
 
-	subscription_id := p.MonitorProcess(to)
+	subscription_id := p.MonitorProcess(producer)
 	subscription.Pid = p.Self()
 	subscription.Ref = subscription_id
 
@@ -308,7 +319,7 @@ func (gst *GenStage) Subscribe(p *Process, to etf.Term, opts GenStageSubscribeOp
 	msg := etf.Tuple{
 		etf.Atom("$gen_consumer"),
 		etf.Tuple{p.Self(), subscription_id},
-		etf.Tuple{etf.Atom("subscribed"), to, subscribe_opts},
+		etf.Tuple{etf.Atom("subscribed"), producer, subscribe_opts},
 	}
 	p.Send(p.Self(), msg)
 
@@ -317,7 +328,7 @@ func (gst *GenStage) Subscribe(p *Process, to etf.Term, opts GenStageSubscribeOp
 		etf.Tuple{p.Self(), subscription_id},
 		etf.Tuple{etf.Atom("subscribe"), nil, subscribe_opts},
 	}
-	p.Send(to, msg)
+	p.Send(producer, msg)
 
 	return subscription, nil
 }
@@ -343,7 +354,7 @@ func (gst *GenStage) Cancel(subscription etf.Ref, reason string) error {
 func (gs *GenStage) Init(p *Process, args ...interface{}) interface{} {
 	//var stageOptions GenStageOptions
 	state := &stateGenStage{
-		producers: map[etf.Pid]subscriptionInternal{},
+		producers: map[string]subscriptionInternal{},
 		consumers: map[etf.Pid]subscriptionInternal{},
 	}
 
@@ -377,6 +388,11 @@ func (gs *GenStage) HandleCall(from etf.Tuple, message etf.Term, state interface
 	case setForwardDemand:
 		// m.forward
 		// disableForwarding = !m.forward
+		return "reply", "ok", state
+	case sendEvents:
+		// m.events
+		// dispatch to the subscribers
+		return "reply", "ok", state
 
 	default:
 		reply, term, internal := st.p.object.(GenStageBehaviour).HandleGenStageCall(from, message, st.internal)
@@ -489,12 +505,12 @@ func (gs *GenStage) HandleCanceled(subscription GenStageSubscription, reason str
 	return nil, state
 }
 
-func (gs *GenStage) HandleEvents(subscription GenStageSubscription, events []etf.Term, state interface{}) (error, interface{}) {
+func (gs *GenStage) HandleEvents(subscription GenStageSubscription, events etf.List, state interface{}) (error, interface{}) {
 	fmt.Printf("GenStage HandleEvents: unhandled subscription (%#v) events %#v\n", subscription, events)
 	return nil, state
 }
 
-func (gs *GenStage) HandleDemand(subscription GenStageSubscription, demand uint, state interface{}) (error, []etf.Term, interface{}) {
+func (gs *GenStage) HandleDemand(subscription GenStageSubscription, demand uint, state interface{}) (error, etf.List, interface{}) {
 	fmt.Printf("GenStage HandleDemand: unhandled subscription (%#v) demand %#v\n", subscription, demand)
 	return nil, nil, state
 }
@@ -518,6 +534,15 @@ func handleConsumer(subscription GenStageSubscription, cmd stageRequestCommand, 
 	var manualDemand bool
 
 	switch cmd.Cmd {
+	case etf.Atom("events"):
+		events := cmd.Opt1.(etf.List)
+		object := state.p.object
+		err, state.internal = object.(GenStageBehaviour).HandleEvents(subscription, events, state.internal)
+		if err != nil {
+			return nil, err
+		}
+		return etf.Atom("ok"), nil
+
 	case etf.Atom("subscribed"):
 		if err := etf.TermProplistIntoStruct(cmd.Opt2, &subscriptionOpts); err != nil {
 			return nil, err
@@ -529,6 +554,8 @@ func handleConsumer(subscription GenStageSubscription, cmd stageRequestCommand, 
 		if err != nil {
 			return nil, err
 		}
+		// cmd.Opt1 - producer
+		//state.producers[cmd.Opt1]
 
 		if !manualDemand {
 			// call Ask method
@@ -568,26 +595,31 @@ func handleProducer(subscription GenStageSubscription, cmd stageRequestCommand, 
 			return nil, err
 		}
 
-		if _, ok := state.consumers[subscription.Pid]; ok {
-			// this consumer already has a subscription. cancel it before we
-			// make a new subscription
-			//FIXME
-		}
-
 		object := state.p.object
 		err, state.internal = object.(GenStageBehaviour).HandleSubscribe(subscription, subscriptionOpts, state.internal)
 
 		switch err {
 		case nil:
-			// cancel current subscription if this consumer already has subscription
-			if ref, ok := state.consumers[subscription.Pid]; ok {
+			// notify dispatcher about the new subscription
+			state.dispatcherState = state.options.dispatcher.Subscribe(subscription, subscriptionOpts, state.dispatcherState)
+			// cancel current subscription if this consumer has been already subscribed
+			if s, ok := state.consumers[subscription.Pid]; ok {
 				msg := etf.Tuple{
 					etf.Atom("$gen_consumer"),
-					etf.Tuple{subscription.Pid, ref},
+					etf.Tuple{subscription.Pid, s.Ref},
 					etf.Tuple{etf.Atom("cancel"), "resubscribed"},
 				}
 				state.p.Send(subscription.Pid, msg)
+				// notify dispatcher about cancelation the previous subscription
+				canceledSubscription := GenStageSubscription{
+					Pid: subscription.Pid,
+					Ref: s.Ref,
+				}
+				state.dispatcherState = state.options.dispatcher.Cancel(canceledSubscription, state.dispatcherState)
 
+				s.Ref = subscription.Ref
+				state.consumers[subscription.Pid] = s
+				return etf.Atom("ok"), nil
 			}
 
 			// monitor subscriber in order to remove this subscription
@@ -631,6 +663,17 @@ func handleProducer(subscription GenStageSubscription, cmd stageRequestCommand, 
 			// preallocated array behind the slice.
 			// see how it was made in lib.TakeBuffer
 			state.demandBuffer = append(state.demandBuffer, d)
+			return etf.Atom("ok"), nil
+		}
+
+		// send cancel if we got demand from a consumer which hasn't subscription
+		if _, ok := state.consumers[subscription.Pid]; !ok {
+			msg := etf.Tuple{
+				etf.Atom("$gen_consumer"),
+				etf.Tuple{subscription.Pid, subscription.Ref},
+				etf.Tuple{etf.Atom("cancel"), "not subscribed"},
+			}
+			state.p.Send(subscription.Pid, msg)
 			return etf.Atom("ok"), nil
 		}
 
