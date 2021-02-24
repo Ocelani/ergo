@@ -1,8 +1,8 @@
 package ergo
 
 import (
-//"github.com/halturin/ergo/etf"
-//"fmt"
+	"github.com/halturin/ergo/etf"
+	//"fmt"
 )
 
 // GenStageDispatcherBehaviour defined interface for the dispatcher
@@ -18,7 +18,7 @@ type GenStageDispatcherBehaviour interface {
 	Cancel(subscription GenStageSubscription, state interface{}) interface{}
 
 	// Dispatch called every time a producer wants to dispatch an event.
-	Dispatch(events string, length int, state interface{}) interface{}
+	Dispatch(events etf.List, state interface{}) interface{}
 
 	// Subscribe called every time the producer gets a new subscriber
 	Subscribe(subscription GenStageSubscription, opts GenStageSubscribeOptions, state interface{}) interface{}
@@ -81,7 +81,7 @@ func (dd *dispatcherDemand) Cancel(subscription GenStageSubscription, state inte
 	return state
 }
 
-func (dd *dispatcherDemand) Dispatch(events string, length int, state interface{}) interface{} {
+func (dd *dispatcherDemand) Dispatch(events etf.List, state interface{}) interface{} {
 	return state
 }
 
@@ -103,7 +103,7 @@ func (db *dispatcherBroadcast) Cancel(subscription GenStageSubscription, state i
 	return state
 }
 
-func (db *dispatcherBroadcast) Dispatch(events string, length int, state interface{}) interface{} {
+func (db *dispatcherBroadcast) Dispatch(events etf.List, state interface{}) interface{} {
 	return state
 }
 
@@ -125,7 +125,7 @@ func (dp *dispatcherPartition) Cancel(subscription GenStageSubscription, state i
 	return state
 }
 
-func (dp *dispatcherPartition) Dispatch(events string, length int, state interface{}) interface{} {
+func (dp *dispatcherPartition) Dispatch(events etf.List, state interface{}) interface{} {
 	return state
 }
 
