@@ -596,8 +596,6 @@ func handleProducer(subscription GenStageSubscription, cmd stageRequestCommand, 
 
 		switch err {
 		case nil:
-			// notify dispatcher about the new subscription
-			state.dispatcherState = state.options.dispatcher.Subscribe(subscription, subscriptionOpts, state.dispatcherState)
 			// cancel current subscription if this consumer has been already subscribed
 			if s, ok := state.consumers[subscription.Pid]; ok {
 				msg := etf.Tuple{
@@ -611,7 +609,10 @@ func handleProducer(subscription GenStageSubscription, cmd stageRequestCommand, 
 					Pid: subscription.Pid,
 					Ref: s.Ref,
 				}
+				// cancel current demands
 				state.dispatcherState = state.options.dispatcher.Cancel(canceledSubscription, state.dispatcherState)
+				// notify dispatcher about the new subscription
+				state.dispatcherState = state.options.dispatcher.Subscribe(subscription, subscriptionOpts, state.dispatcherState)
 
 				s.Ref = subscription.Ref
 				state.consumers[subscription.Pid] = s
@@ -626,6 +627,7 @@ func handleProducer(subscription GenStageSubscription, cmd stageRequestCommand, 
 				Monitor: m,
 			}
 			state.consumers[subscription.Pid] = s
+			state.dispatcherState = state.options.dispatcher.Subscribe(subscription, subscriptionOpts, state.dispatcherState)
 			return etf.Atom("ok"), nil
 
 		case ErrNotAProducer:
@@ -699,6 +701,8 @@ func handleProducer(subscription GenStageSubscription, cmd stageRequestCommand, 
 			}
 			state.p.Send(deliver[d].subscription.Pid, msg)
 		}
+
+		return etf.Atom("ok"), nil
 
 	case etf.Atom("cancel"):
 		var e error

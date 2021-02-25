@@ -12,7 +12,7 @@ type GenStageDispatcherBehaviour interface {
 	Init(opts GenStageOptions) interface{}
 
 	// Ask called every time a consumer sends demand
-	Ask(subscription GenStageSubscription, demand uint, state interface{}) interface{}
+	Ask(subscription GenStageSubscription, count uint, state interface{}) interface{}
 
 	// Cancel called every time a subscription is cancelled or the consumer goes down.
 	Cancel(subscription GenStageSubscription, state interface{}) interface{}
@@ -76,9 +76,9 @@ type GenStageDispatchItem struct {
 
 type demand struct {
 	subscription GenStageSubscription
-	minDemand    int
-	maxDemand    int
-	n            int
+	minDemand    uint
+	maxDemand    uint
+	n            uint
 }
 
 type demandState struct {
@@ -102,9 +102,15 @@ func (dd *dispatcherDemand) Init(opts GenStageOptions) interface{} {
 	return state
 }
 
-func (dd *dispatcherDemand) Ask(subscription GenStageSubscription, demand uint, state interface{}) interface{} {
+func (dd *dispatcherDemand) Ask(subscription GenStageSubscription, count uint, state interface{}) interface{} {
+	finalState := state.(*demandState)
+	demand, ok := finalState.demands[subscription.Pid]
+	if !ok {
+		return state
+	}
+	demand.n += count
 
-	return state
+	return finalState
 }
 
 func (dd *dispatcherDemand) Cancel(subscription GenStageSubscription, state interface{}) interface{} {
@@ -158,19 +164,20 @@ func (dd *dispatcherDemand) Dispatch(events etf.List, state interface{}) ([]GenS
 		pid := finalState.order[finalState.i]
 		demand := finalState.demands[pid]
 
-		if len(finalState.events) < demand.minDemand {
+		if demand.n == 0 || len(finalState.events) < int(demand.minDemand) {
 			continue
 		}
 
 		item := makeDispatchItem(finalState.events, demand.subscription, demand.maxDemand)
 		dispatchItems = append(dispatchItems, item)
+		demand.n--
 
 		finalState.i++
 	}
 	return dispatchItems, finalState
 }
 
-func makeDispatchItem(events chan etf.Term, subscription GenStageSubscription, n int) GenStageDispatchItem {
+func makeDispatchItem(events chan etf.Term, subscription GenStageSubscription, n uint) GenStageDispatchItem {
 	item := GenStageDispatchItem{
 		subscription: subscription,
 	}
@@ -192,7 +199,15 @@ func makeDispatchItem(events chan etf.Term, subscription GenStageSubscription, n
 }
 
 func (dd *dispatcherDemand) Subscribe(subscription GenStageSubscription, opts GenStageSubscribeOptions, state interface{}) interface{} {
-	return state
+	finalState := state.(*demandState)
+	newDemand := &demand{
+		subscription: subscription,
+		minDemand:    opts.MinDemand,
+		maxDemand:    opts.MaxDemand,
+	}
+	finalState.demands[subscription.Pid] = newDemand
+	finalState.order = append(finalState.order, subscription.Pid)
+	return finalState
 }
 
 // Dispatcher Broadcast implementation
@@ -201,7 +216,7 @@ func (db *dispatcherBroadcast) Init(opts GenStageOptions) interface{} {
 	return nil
 }
 
-func (db *dispatcherBroadcast) Ask(subscription GenStageSubscription, demand uint, state interface{}) interface{} {
+func (db *dispatcherBroadcast) Ask(subscription GenStageSubscription, count uint, state interface{}) interface{} {
 	return state
 }
 
@@ -223,7 +238,7 @@ func (dp *dispatcherPartition) Init(opts GenStageOptions) interface{} {
 	return nil
 }
 
-func (dp *dispatcherPartition) Ask(subscription GenStageSubscription, demand uint, state interface{}) interface{} {
+func (dp *dispatcherPartition) Ask(subscription GenStageSubscription, count uint, state interface{}) interface{} {
 	return state
 }
 
