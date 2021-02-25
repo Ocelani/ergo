@@ -30,9 +30,9 @@ type GenStageOptions struct {
 	// default is 10000
 	bufferSize uint
 
-	// bufferKeepFirst defines whether the first or last entries should be
+	// bufferKeepLast defines whether the first or last entries should be
 	// kept on the buffer in case the buffer size is exceeded.
-	bufferKeepFirst bool
+	bufferKeepLast bool
 
 	dispatcher GenStageDispatcherBehaviour
 }
@@ -645,6 +645,7 @@ func handleProducer(subscription GenStageSubscription, cmd stageRequestCommand, 
 
 	case etf.Atom("ask"):
 		var events etf.List
+		var deliver []GenStageDispatchItem
 		// {ask, Demand}
 		demand, ok := cmd.Opt1.(uint)
 		if !ok {
@@ -681,11 +682,23 @@ func handleProducer(subscription GenStageSubscription, cmd stageRequestCommand, 
 		dispatcher := state.options.dispatcher
 		state.dispatcherState = dispatcher.Ask(subscription, demand, state.dispatcherState)
 		// if HandleDemand provided events for the dispatching handle it right away
-		if len(events) > 0 {
-			state.dispatcherState = dispatcher.Dispatch(events, state.dispatcherState)
+		if len(events) == 0 {
+			return etf.Atom("ok"), nil
 		}
 
-		return etf.Atom("ok"), nil
+		deliver, state.dispatcherState = dispatcher.Dispatch(events, state.dispatcherState)
+		if len(deliver) == 0 {
+			return etf.Atom("ok"), nil
+		}
+
+		for d := range deliver {
+			msg := etf.Tuple{
+				etf.Atom("$gen_consumer"),
+				etf.Tuple{deliver[d].subscription.Pid, deliver[d].subscription.Ref},
+				deliver[d].events,
+			}
+			state.p.Send(deliver[d].subscription.Pid, msg)
+		}
 
 	case etf.Atom("cancel"):
 		var e error
@@ -698,5 +711,6 @@ func handleProducer(subscription GenStageSubscription, cmd stageRequestCommand, 
 		e, state.internal = object.(GenStageBehaviour).HandleCancel(subscription, reason, state.internal)
 		return etf.Atom("ok"), e
 	}
+
 	return nil, fmt.Errorf("unknown GenStage command (HandleCall)")
 }
