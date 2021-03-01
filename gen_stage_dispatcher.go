@@ -1,8 +1,8 @@
 package ergo
 
 import (
+	//	"fmt"
 	"github.com/halturin/ergo/etf"
-	//"fmt"
 )
 
 // GenStageDispatcherBehaviour defined interface for the dispatcher
@@ -122,6 +122,7 @@ func (dd *dispatcherDemand) Cancel(subscription GenStageSubscription, state inte
 		}
 		finalState.order[i] = finalState.order[0]
 		finalState.order = finalState.order[1:]
+		break
 	}
 	return finalState
 }
