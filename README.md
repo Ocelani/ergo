@@ -1,4 +1,4 @@
-<h1> <img src="https://raw.githubusercontent.com/halturin/ergo/genstage/.images/logo.svg" alt="Ergo Framework" width="159" height="49"></h1>
+<h1> <img src=".images/logo.svg" alt="Ergo Framework" width="159" height="49"></h1>
 
 [![GitHub release](https://img.shields.io/github/release/halturin/ergo.svg)](https://github.com/halturin/ergo/releases/latest)
 [![Go Report Card](https://goreportcard.com/badge/github.com/halturin/ergo)](https://goreportcard.com/report/github.com/halturin/ergo)
