@@ -7,7 +7,9 @@
 [![codecov](https://codecov.io/gh/halturin/ergo/graph/badge.svg)](https://codecov.io/gh/halturin/ergo)
 [![Build Status](https://travis-ci.org/halturin/ergo.svg)](https://travis-ci.org/halturin/ergo)
 
-Implementation of Erlang/OTP in Golang. Up to x5 times faster than original Erlang/OTP in terms of network messaging. The easiest drop-in replacement for your hot nodes in the cluster.
+Technologies and design patterns of Erlang/OTP have been proven over the years. Now in Golang.
+Up to x5 times faster than original Erlang/OTP in terms of network messaging.
+The easiest drop-in replacement for your hot nodes in the cluster.
 
 ### Purpose ###
 
