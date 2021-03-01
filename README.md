@@ -306,4 +306,4 @@ is your company using Ergo? add your company logo/name here
 
 ### Commercial support
 
-if you are looking for commercial support feel free to contact me via email (halturin at gmail dot com)
+please, visit https://ergo.services for more information
