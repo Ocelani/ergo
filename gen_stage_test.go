@@ -17,8 +17,11 @@ type GenStageConsumerTest struct {
 }
 
 // a simple GenStage Producer
-func (gs *GenStageProducerTest) HandleDemand(subscription GenStageSubscription, demand uint, state interface{}) (error, etf.List, interface{}) {
-	return nil, nil, state
+func (gs *GenStageProducerTest) HandleDemand(subscription GenStageSubscription, count uint, state interface{}) (error, etf.List, interface{}) {
+	Events := etf.List{
+		1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+	}
+	return nil, Events, state
 }
 
 func (gs *GenStageProducerTest) HandleSubscribe(subscription GenStageSubscription, options GenStageSubscribeOptions, state interface{}) (error, interface{}) {

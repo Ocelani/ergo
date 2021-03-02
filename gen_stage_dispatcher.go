@@ -1,7 +1,7 @@
 package ergo
 
 import (
-	//	"fmt"
+	"fmt"
 	"github.com/halturin/ergo/etf"
 )
 
@@ -128,6 +128,7 @@ func (dd *dispatcherDemand) Cancel(subscription GenStageSubscription, state inte
 }
 
 func (dd *dispatcherDemand) Dispatch(events etf.List, state interface{}) ([]GenStageDispatchItem, interface{}) {
+	fmt.Println("DISPATCHING")
 	// ignore empty event list
 	if len(events) == 0 {
 		return nil, state
