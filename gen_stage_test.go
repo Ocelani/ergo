@@ -54,7 +54,7 @@ func TestGenStageSimple(t *testing.T) {
 	consumer3Process, _ := node1.Spawn("stageConsumer3", ProcessOptions{}, consumer, nil)
 
 	subOpts := GenStageSubscribeOptions{
-		MinDemand: 10,
+		MinDemand: 2,
 		MaxDemand: 20,
 	}
 	consumer.Subscribe(consumer1Process, "stageProducer", subOpts)

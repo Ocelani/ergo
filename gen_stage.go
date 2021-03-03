@@ -27,7 +27,7 @@ type GenStageOptions struct {
 	disableForwarding bool
 
 	// bufferSize the size of the buffer to store events without demand.
-	// default is 10000
+	// default value = defaultDispatcherBufferSize
 	bufferSize uint
 
 	// bufferKeepLast defines whether the first or last entries should be
@@ -41,6 +41,8 @@ const (
 	GenStageCancelPermanent GenStageCancelMode = 0
 	GenStageCancelTransient GenStageCancelMode = 1
 	GenStageCancelTemporary GenStageCancelMode = 2
+
+	defaultDispatcherBufferSize = 10000
 )
 
 var (
@@ -362,6 +364,9 @@ func (gs *GenStage) Init(p *Process, args ...interface{}) interface{} {
 
 	state.p = p
 	state.options, state.internal = p.object.(GenStageBehaviour).InitStage(p, args)
+	if state.options.bufferSize == 0 {
+		state.options.bufferSize = defaultDispatcherBufferSize
+	}
 
 	// if dispatcher wasn't specified create a default one GenStageDispatcherDemand
 	if state.options.dispatcher == nil {
@@ -710,7 +715,6 @@ func handleProducer(subscription GenStageSubscription, cmd stageRequestCommand, 
 		object := state.p.object
 		_, events, state.internal = object.(GenStageBehaviour).HandleDemand(subscription, count, state.internal)
 
-		fmt.Println("DEMAND DISPATCHING")
 		// register this demand in the dispatcher
 		dispatcher := state.options.dispatcher
 		state.dispatcherState = dispatcher.Ask(subscription, count, state.dispatcherState)
@@ -724,6 +728,7 @@ func handleProducer(subscription GenStageSubscription, cmd stageRequestCommand, 
 			return etf.Atom("ok"), nil
 		}
 
+		fmt.Println("DEMAND DELIVERING")
 		for d := range deliver {
 			msg := etf.Tuple{
 				etf.Atom("$gen_consumer"),
