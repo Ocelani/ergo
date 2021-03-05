@@ -31,6 +31,7 @@ func (gs *GenStageProducerTest) HandleSubscribe(subscription GenStageSubscriptio
 
 // a simple GenStage Consumer
 func (gs *GenStageConsumerTest) HandleEvents(subscription GenStageSubscription, events etf.List, state interface{}) (error, interface{}) {
+	fmt.Println("AAAAAAAAA GOT EVENTS", events)
 	return nil, state
 }
 
@@ -54,13 +55,16 @@ func TestGenStageSimple(t *testing.T) {
 	consumer3Process, _ := node1.Spawn("stageConsumer3", ProcessOptions{}, consumer, nil)
 
 	subOpts := GenStageSubscribeOptions{
-		MinDemand: 2,
-		MaxDemand: 20,
+		MinDemand:    2,
+		MaxDemand:    20,
+		ManualDemand: true,
 	}
 	consumer.Subscribe(consumer1Process, "stageProducer", subOpts)
-	consumer.Subscribe(consumer2Process, "stageProducer", subOpts)
+	sub := consumer.Subscribe(consumer2Process, "stageProducer", subOpts)
 	consumer.Subscribe(consumer3Process, "stageProducer", subOpts)
 	consumer.Subscribe(consumer3Process, "stageProducer", subOpts)
+
+	consumer.Ask(consumer2Process, sub, 10)
 
 	time.Sleep(1 * time.Second)
 	fmt.Println("OKKK")

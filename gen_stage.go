@@ -174,7 +174,7 @@ type stageRequestCommand struct {
 type stageMessage struct {
 	Request      etf.Atom
 	Subscription GenStageSubscription
-	Command      stageRequestCommand
+	Command      interface{}
 }
 
 type downMessage struct {
@@ -308,6 +308,10 @@ func (gst *GenStage) Subscribe(p *Process, producer etf.Term, opts GenStageSubsc
 			etf.Atom("cancel"),
 			opts.Cancel,
 		},
+		etf.Tuple{
+			etf.Atom("mode"),
+			opts.ManualDemand,
+		},
 	}
 
 	// In order to get rid of race condition we should send this message
@@ -338,7 +342,7 @@ func (gst *GenStage) Ask(p *Process, subscription GenStageSubscription, count ui
 		subscription: subscription,
 		count:        count,
 	}
-	p.Call(p.Self(), message)
+	aa, ee := p.Call(p.Self(), message)
 	return
 }
 
@@ -453,8 +457,7 @@ func (gs *GenStage) HandleInfo(message etf.Term, state interface{}) (string, int
 	// check if we got a 'DOWN' mesaage
 	// {DOWN, Ref, process, PidOrName, Reason}
 	if err := etf.TermIntoStruct(message, &d); err == nil && d.Down == etf.Atom("DOWN") {
-
-		// send Cancel message to itself
+		handleDown(d, st)
 		return "noreply", state
 	}
 
@@ -544,11 +547,27 @@ func (gs *GenStage) HandleDemand(subscription GenStageSubscription, count uint, 
 // private functions
 
 func handleRequest(m stageMessage, state *stateGenStage) (etf.Term, error) {
+	var command stageRequestCommand
 	switch m.Request {
 	case "$gen_consumer":
-		return handleConsumer(m.Subscription, m.Command, state)
+		// I wish i had {events, [...]} for the events message (in
+		// fashion of the other messages), but the original autors
+		// made this way, so i have to use this little hack in order
+		// to use the same handler
+		if cmd, ok := m.Command.(etf.List); ok {
+			command.Cmd = etf.Atom("events")
+			command.Opt1 = cmd
+			return handleConsumer(m.Subscription, command, state)
+		}
+		if err := etf.TermIntoStruct(m.Command, &command); err != nil {
+			return nil, ErrUnsupportedRequest
+		}
+		return handleConsumer(m.Subscription, command, state)
 	case "$gen_producer":
-		return handleProducer(m.Subscription, m.Command, state)
+		if err := etf.TermIntoStruct(m.Command, &command); err != nil {
+			return nil, ErrUnsupportedRequest
+		}
+		return handleProducer(m.Subscription, command, state)
 	}
 	return nil, ErrUnsupportedRequest
 }
@@ -580,11 +599,15 @@ func handleConsumer(subscription GenStageSubscription, cmd stageRequestCommand, 
 		if err != nil {
 			return nil, err
 		}
-		// cmd.Opt1 - producer
+
+		producer := cmd.Opt1
+		// monitor producer in order to remove this subscription
+		// if it terminated unexpectedly
+		m := state.p.MonitorProcess(producer)
+
 		//state.producers[cmd.Opt1]
 
 		if !manualDemand {
-			producer := cmd.Opt1
 			msg := etf.Tuple{
 				etf.Atom("$gen_producer"),
 				etf.Tuple{subscription.Pid, subscription.Ref},
@@ -701,7 +724,7 @@ func handleProducer(subscription GenStageSubscription, cmd stageRequestCommand, 
 			return etf.Atom("ok"), nil
 		}
 
-		// send cancel if we got demand from a consumer which hasn't subscription
+		// send cancel if we got demand from a consumer which hasn't subscribed
 		if _, ok := state.consumers[subscription.Pid]; !ok {
 			msg := etf.Tuple{
 				etf.Atom("$gen_consumer"),
@@ -728,8 +751,8 @@ func handleProducer(subscription GenStageSubscription, cmd stageRequestCommand, 
 			return etf.Atom("ok"), nil
 		}
 
-		fmt.Println("DEMAND DELIVERING")
 		for d := range deliver {
+			fmt.Println("DEMAND DELIVERING", deliver[d])
 			msg := etf.Tuple{
 				etf.Atom("$gen_consumer"),
 				etf.Tuple{deliver[d].subscription.Pid, deliver[d].subscription.Ref},
@@ -753,4 +776,21 @@ func handleProducer(subscription GenStageSubscription, cmd stageRequestCommand, 
 	}
 
 	return nil, fmt.Errorf("unknown GenStage command (HandleCall)")
+}
+
+func handleDown(down downMessage, state *stateGenStage) error {
+	var err error
+	// remove subscription for producer and consumer. corner case - two
+	// processes have subscribed to each other.
+
+	// we also should clean a demand from the dispatcher if this process
+	// act as a producer
+
+	cmd := stageRequestCommand{
+		Cmd:  etf.Atom("cancel"),
+		Opt1: down.Reason,
+	}
+	_, err = handleProducer(subscription, cmd, state)
+	_, err = handleConsumer(subscription, cmd, state)
+	return err
 }
