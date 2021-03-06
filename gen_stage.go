@@ -194,7 +194,7 @@ type setManualDemand struct {
 
 type setCancelMode struct {
 	subscription GenStageSubscription
-	mode         GenStageCancelMode
+	cancel       GenStageCancelMode
 }
 
 type doSubscribe struct {
@@ -283,7 +283,7 @@ func (gst *GenStage) SendEvents(p *Process, events etf.List) error {
 func (gst *GenStage) SetCancelMode(p *Process, subscription GenStageSubscription, cancel GenStageCancelMode) {
 	message := setCancelMode{
 		subscription: subscription,
-		mode:         cancel,
+		cancel:       cancel,
 	}
 	p.Call(p.Self(), message)
 	return
@@ -404,7 +404,12 @@ func (gst *GenStage) HandleCall(from etf.Tuple, message etf.Term, state interfac
 		return "reply", "ok", state
 
 	case setCancelMode:
-		// m.cancel
+		subInternal, ok := st.producers[m.subscription.Ref.String()]
+		if !ok {
+			return "reply", fmt.Errorf("unknown subscription"), state
+		}
+		subInternal.Options.Cancel = m.cancel
+		st.producers[m.subscription.Ref.String()] = subInternal
 		return "reply", "ok", state
 
 	case setForwardDemand:
