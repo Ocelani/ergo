@@ -12,16 +12,16 @@ type GenStageDispatcherBehaviour interface {
 	Init(opts GenStageOptions) interface{}
 
 	// Ask called every time a consumer sends demand
-	Ask(subscription GenStageSubscription, count uint, state interface{}) interface{}
+	Ask(subscription GenStageSubscription, count uint, state interface{})
 
 	// Cancel called every time a subscription is cancelled or the consumer goes down.
-	Cancel(subscription GenStageSubscription, state interface{}) interface{}
+	Cancel(subscription GenStageSubscription, state interface{})
 
 	// Dispatch called every time a producer wants to dispatch an event.
-	Dispatch(events etf.List, state interface{}) ([]GenStageDispatchItem, interface{})
+	Dispatch(events etf.List, state interface{}) []GenStageDispatchItem
 
 	// Subscribe called every time the producer gets a new subscriber
-	Subscribe(subscription GenStageSubscription, opts GenStageSubscribeOptions, state interface{}) interface{}
+	Subscribe(subscription GenStageSubscription, opts GenStageSubscribeOptions, state interface{})
 }
 
 type GenStageDispatcher int
@@ -102,51 +102,50 @@ func (dd *dispatcherDemand) Init(opts GenStageOptions) interface{} {
 	return state
 }
 
-func (dd *dispatcherDemand) Ask(subscription GenStageSubscription, count uint, state interface{}) interface{} {
-	finalState := state.(*demandState)
-	demand, ok := finalState.demands[subscription.Pid]
+func (dd *dispatcherDemand) Ask(subscription GenStageSubscription, count uint, state interface{}) {
+	st := state.(*demandState)
+	demand, ok := st.demands[subscription.Pid]
 	if !ok {
-		return state
+		return
 	}
 	demand.n += count
-
-	return finalState
+	return
 }
 
-func (dd *dispatcherDemand) Cancel(subscription GenStageSubscription, state interface{}) interface{} {
-	finalState := state.(*demandState)
-	delete(finalState.demands, subscription.Pid)
-	for i := range finalState.order {
-		if finalState.order[i] != subscription.Pid {
+func (dd *dispatcherDemand) Cancel(subscription GenStageSubscription, state interface{}) {
+	st := state.(*demandState)
+	delete(st.demands, subscription.Pid)
+	for i := range st.order {
+		if st.order[i] != subscription.Pid {
 			continue
 		}
-		finalState.order[i] = finalState.order[0]
-		finalState.order = finalState.order[1:]
+		st.order[i] = st.order[0]
+		st.order = st.order[1:]
 		break
 	}
-	return finalState
+	return
 }
 
-func (dd *dispatcherDemand) Dispatch(events etf.List, state interface{}) ([]GenStageDispatchItem, interface{}) {
+func (dd *dispatcherDemand) Dispatch(events etf.List, state interface{}) []GenStageDispatchItem {
 	fmt.Println("DISPATCHING", events)
 	// ignore empty event list
 	if len(events) == 0 {
-		return nil, state
+		return nil
 	}
 
-	finalState := state.(*demandState)
+	st := state.(*demandState)
 	// put events into the buffer before we start dispatching
 	for e := range events {
 		select {
-		case finalState.events <- events[e]:
-			fmt.Println("DISPATCHING put into channel", events[e], len(finalState.events))
+		case st.events <- events[e]:
+			fmt.Println("DISPATCHING put into channel", events[e], len(st.events))
 			continue
 		default:
-			fmt.Println("DISPATCHING buffer is full", events[e], len(finalState.events))
+			fmt.Println("DISPATCHING buffer is full", events[e], len(st.events))
 			// buffer is full
-			if finalState.bufferKeepLast {
-				<-finalState.events
-				finalState.events <- events[e]
+			if st.bufferKeepLast {
+				<-st.events
+				st.events <- events[e]
 				continue
 			}
 		}
@@ -154,36 +153,36 @@ func (dd *dispatcherDemand) Dispatch(events etf.List, state interface{}) ([]GenS
 		break
 	}
 
-	fmt.Println("DISPATCHING ORDER", finalState.order)
+	fmt.Println("DISPATCHING ORDER", st.order)
 	// check out whether we have subscribers
-	if len(finalState.order) == 0 {
-		return nil, finalState
+	if len(st.order) == 0 {
+		return nil
 	}
 
 	dispatchItems := []GenStageDispatchItem{}
-	for range finalState.order {
-		if len(finalState.events) == 0 {
+	for range st.order {
+		if len(st.events) == 0 {
 			// have nothing to dispatch
 			break
 		}
-		if finalState.i > len(finalState.order)-1 {
-			finalState.i = 0
+		if st.i > len(st.order)-1 {
+			st.i = 0
 		}
 
-		pid := finalState.order[finalState.i]
-		demand := finalState.demands[pid]
-		finalState.i++
+		pid := st.order[st.i]
+		demand := st.demands[pid]
+		st.i++
 
-		if demand.n < demand.minDemand || len(finalState.events) < int(demand.minDemand) {
+		if demand.n < demand.minDemand || len(st.events) < int(demand.minDemand) {
 			continue
 		}
 
-		item := makeDispatchItem(finalState.events, demand)
+		item := makeDispatchItem(st.events, demand)
 		dispatchItems = append(dispatchItems, item)
 	}
 
 	fmt.Println("DISPATCHING ITEMS", dispatchItems)
-	return dispatchItems, finalState
+	return dispatchItems
 }
 
 func makeDispatchItem(events chan etf.Term, d *demand) GenStageDispatchItem {
@@ -214,16 +213,16 @@ func makeDispatchItem(events chan etf.Term, d *demand) GenStageDispatchItem {
 	return item
 }
 
-func (dd *dispatcherDemand) Subscribe(subscription GenStageSubscription, opts GenStageSubscribeOptions, state interface{}) interface{} {
-	finalState := state.(*demandState)
+func (dd *dispatcherDemand) Subscribe(subscription GenStageSubscription, opts GenStageSubscribeOptions, state interface{}) {
+	st := state.(*demandState)
 	newDemand := &demand{
 		subscription: subscription,
 		minDemand:    opts.MinDemand,
 		maxDemand:    opts.MaxDemand,
 	}
-	finalState.demands[subscription.Pid] = newDemand
-	finalState.order = append(finalState.order, subscription.Pid)
-	return finalState
+	st.demands[subscription.Pid] = newDemand
+	st.order = append(st.order, subscription.Pid)
+	return
 }
 
 // Dispatcher Broadcast implementation
@@ -232,20 +231,20 @@ func (db *dispatcherBroadcast) Init(opts GenStageOptions) interface{} {
 	return nil
 }
 
-func (db *dispatcherBroadcast) Ask(subscription GenStageSubscription, count uint, state interface{}) interface{} {
-	return state
+func (db *dispatcherBroadcast) Ask(subscription GenStageSubscription, count uint, state interface{}) {
+	return
 }
 
-func (db *dispatcherBroadcast) Cancel(subscription GenStageSubscription, state interface{}) interface{} {
-	return state
+func (db *dispatcherBroadcast) Cancel(subscription GenStageSubscription, state interface{}) {
+	return
 }
 
-func (db *dispatcherBroadcast) Dispatch(events etf.List, state interface{}) ([]GenStageDispatchItem, interface{}) {
-	return nil, state
+func (db *dispatcherBroadcast) Dispatch(events etf.List, state interface{}) []GenStageDispatchItem {
+	return nil
 }
 
-func (db *dispatcherBroadcast) Subscribe(subscription GenStageSubscription, opts GenStageSubscribeOptions, state interface{}) interface{} {
-	return state
+func (db *dispatcherBroadcast) Subscribe(subscription GenStageSubscription, opts GenStageSubscribeOptions, state interface{}) {
+	return
 }
 
 // Dispatcher Partition implementation
@@ -254,18 +253,18 @@ func (dp *dispatcherPartition) Init(opts GenStageOptions) interface{} {
 	return nil
 }
 
-func (dp *dispatcherPartition) Ask(subscription GenStageSubscription, count uint, state interface{}) interface{} {
-	return state
+func (dp *dispatcherPartition) Ask(subscription GenStageSubscription, count uint, state interface{}) {
+	return
 }
 
-func (dp *dispatcherPartition) Cancel(subscription GenStageSubscription, state interface{}) interface{} {
-	return state
+func (dp *dispatcherPartition) Cancel(subscription GenStageSubscription, state interface{}) {
+	return
 }
 
-func (dp *dispatcherPartition) Dispatch(events etf.List, state interface{}) ([]GenStageDispatchItem, interface{}) {
-	return nil, state
+func (dp *dispatcherPartition) Dispatch(events etf.List, state interface{}) []GenStageDispatchItem {
+	return nil
 }
 
-func (dp *dispatcherPartition) Subscribe(subscription GenStageSubscription, opts GenStageSubscribeOptions, state interface{}) interface{} {
-	return state
+func (dp *dispatcherPartition) Subscribe(subscription GenStageSubscription, opts GenStageSubscribeOptions, state interface{}) {
+	return
 }
