@@ -114,13 +114,14 @@ type GenStageSubscription struct {
 }
 
 type subscriptionInternal struct {
-	Ref     etf.Ref
-	Monitor etf.Ref
+	Producer     etf.Term
+	Subscription GenStageSubscription
+	Monitor      etf.Ref
 }
 
 type GenStageSubscribeTo struct {
-	producer etf.Term
-	options  GenStageSubscribeOptions
+	Producer etf.Term
+	Options  GenStageSubscribeOptions
 }
 
 type GenStageSubscribeOptions struct {
@@ -129,7 +130,7 @@ type GenStageSubscribeOptions struct {
 	// The stage implementation will take care of automatically sending
 	// demand to producer (as a default behaviour). You can disable it
 	// setting ManualDemand to true
-	ManualDemand bool `etf:"mode"`
+	ManualDemand bool `etf:"manual"`
 	// What should happend with consumer if producer has terminated
 	// GenStageCancelPermanent the consumer exits when the producer cancels or exits.
 	// GenStageCancelTransient the consumer exits only if reason is not "normal",
@@ -309,7 +310,7 @@ func (gst *GenStage) Subscribe(p *Process, producer etf.Term, opts GenStageSubsc
 			opts.Cancel,
 		},
 		etf.Tuple{
-			etf.Atom("mode"),
+			etf.Atom("manual"),
 			opts.ManualDemand,
 		},
 	}
@@ -342,7 +343,7 @@ func (gst *GenStage) Ask(p *Process, subscription GenStageSubscription, count ui
 		subscription: subscription,
 		count:        count,
 	}
-	aa, ee := p.Call(p.Self(), message)
+	p.Call(p.Self(), message)
 	return
 }
 
@@ -359,11 +360,11 @@ func (gst *GenStage) Cancel(p *Process, subscription GenStageSubscription, reaso
 //
 // GenServer callbacks
 //
-func (gs *GenStage) Init(p *Process, args ...interface{}) interface{} {
+func (gst *GenStage) Init(p *Process, args ...interface{}) interface{} {
 	//var stageOptions GenStageOptions
 	state := &stateGenStage{
-		producers: map[string]subscriptionInternal{},
-		consumers: map[etf.Pid]subscriptionInternal{},
+		producers: make(map[string]subscriptionInternal),
+		consumers: make(map[etf.Pid]subscriptionInternal),
 	}
 
 	state.p = p
@@ -378,11 +379,16 @@ func (gs *GenStage) Init(p *Process, args ...interface{}) interface{} {
 	}
 
 	state.dispatcherState = state.options.dispatcher.Init(state.options)
+	if len(state.options.subscribeTo) > 0 {
+		for _, s := range state.options.subscribeTo {
+			gst.Subscribe(p, s.Producer, s.Options)
+		}
+	}
 
 	return state
 }
 
-func (gs *GenStage) HandleCall(from etf.Tuple, message etf.Term, state interface{}) (string, etf.Term, interface{}) {
+func (gst *GenStage) HandleCall(from etf.Tuple, message etf.Term, state interface{}) (string, etf.Term, interface{}) {
 	fmt.Println("Stage call")
 	st := state.(*stateGenStage)
 
@@ -407,7 +413,11 @@ func (gs *GenStage) HandleCall(from etf.Tuple, message etf.Term, state interface
 	case demandRequest:
 		// FIXME get the real producer
 		// ignore if ManualDemand == true
-		producer := st.p.Self()
+		subInternal, ok := st.producers[m.subscription.Ref.String()]
+		if !ok {
+			return "reply", fmt.Errorf("unknown subscription"), state
+		}
+		producer := subInternal.Producer
 		msg := etf.Tuple{
 			etf.Atom("$gen_producer"),
 			etf.Tuple{m.subscription.Pid, m.subscription.Ref},
@@ -435,7 +445,7 @@ func (gs *GenStage) HandleCall(from etf.Tuple, message etf.Term, state interface
 	return "reply", "ok", state
 }
 
-func (gs *GenStage) HandleCast(message etf.Term, state interface{}) (string, interface{}) {
+func (gst *GenStage) HandleCast(message etf.Term, state interface{}) (string, interface{}) {
 	fmt.Println("Stage cast")
 
 	st := state.(*stateGenStage)
@@ -445,7 +455,7 @@ func (gs *GenStage) HandleCast(message etf.Term, state interface{}) (string, int
 	return reply, state
 }
 
-func (gs *GenStage) HandleInfo(message etf.Term, state interface{}) (string, interface{}) {
+func (gst *GenStage) HandleInfo(message etf.Term, state interface{}) (string, interface{}) {
 	var r stageMessage
 	var d downMessage
 	var err error
@@ -485,61 +495,61 @@ func (gs *GenStage) HandleInfo(message etf.Term, state interface{}) (string, int
 	return "noreply", state
 }
 
-func (gs *GenStage) Terminate(reason string, state interface{}) {
+func (gst *GenStage) Terminate(reason string, state interface{}) {
 	fmt.Println("Stage terminate")
 	return
 }
 
 // default callbacks
 
-func (gs *GenStage) InitStage(process *Process, args ...interface{}) (GenStageOptions, interface{}) {
+func (gst *GenStage) InitStage(process *Process, args ...interface{}) (GenStageOptions, interface{}) {
 	// GenStage initialization with default options
 	opts := GenStageOptions{}
 	return opts, nil
 }
 
-func (gs *GenStage) HandleGenStageCall(from etf.Tuple, message etf.Term, state interface{}) (string, etf.Term, interface{}) {
+func (gst *GenStage) HandleGenStageCall(from etf.Tuple, message etf.Term, state interface{}) (string, etf.Term, interface{}) {
 	// default callback if it wasn't implemented
 	fmt.Printf("HandleGenStageCall: unhandled message (from %#v) %#v\n", from, message)
 	return "reply", etf.Atom("ok"), state
 }
 
-func (gs *GenStage) HandleGenStageCast(message etf.Term, state interface{}) (string, interface{}) {
+func (gst *GenStage) HandleGenStageCast(message etf.Term, state interface{}) (string, interface{}) {
 	// default callback if it wasn't implemented
 	fmt.Printf("HandleGenStageCast: unhandled message %#v\n", message)
 	return "noreply", state
 }
-func (gs *GenStage) HandleGenStageInfo(message etf.Term, state interface{}) (string, interface{}) {
+func (gst *GenStage) HandleGenStageInfo(message etf.Term, state interface{}) (string, interface{}) {
 	// default callback if it wasn't implemnted
 	fmt.Printf("HandleGenStageInfo: unhandled message %#v\n", message)
 	return "noreply", state
 }
 
-func (gs *GenStage) HandleSubscribe(subscription GenStageSubscription, options GenStageSubscribeOptions,
+func (gst *GenStage) HandleSubscribe(subscription GenStageSubscription, options GenStageSubscribeOptions,
 	state interface{}) (error, interface{}) {
 	return ErrNotAProducer, state
 }
 
-func (gs *GenStage) HandleSubscribed(subscription GenStageSubscription, opts GenStageSubscribeOptions, state interface{}) (error, bool, interface{}) {
+func (gst *GenStage) HandleSubscribed(subscription GenStageSubscription, opts GenStageSubscribeOptions, state interface{}) (error, bool, interface{}) {
 	return nil, opts.ManualDemand, state
 }
 
-func (gs *GenStage) HandleCancel(subscription GenStageSubscription, reason string, state interface{}) (error, interface{}) {
+func (gst *GenStage) HandleCancel(subscription GenStageSubscription, reason string, state interface{}) (error, interface{}) {
 	// default callback if it wasn't implemented
 	return nil, state
 }
 
-func (gs *GenStage) HandleCanceled(subscription GenStageSubscription, reason string, state interface{}) (error, interface{}) {
+func (gst *GenStage) HandleCanceled(subscription GenStageSubscription, reason string, state interface{}) (error, interface{}) {
 	// default callback if it wasn't implemented
 	return nil, state
 }
 
-func (gs *GenStage) HandleEvents(subscription GenStageSubscription, events etf.List, state interface{}) (error, interface{}) {
+func (gst *GenStage) HandleEvents(subscription GenStageSubscription, events etf.List, state interface{}) (error, interface{}) {
 	fmt.Printf("GenStage HandleEvents: unhandled subscription (%#v) events %#v\n", subscription, events)
 	return nil, state
 }
 
-func (gs *GenStage) HandleDemand(subscription GenStageSubscription, count uint, state interface{}) (error, etf.List, interface{}) {
+func (gst *GenStage) HandleDemand(subscription GenStageSubscription, count uint, state interface{}) (error, etf.List, interface{}) {
 	fmt.Printf("GenStage HandleDemand: unhandled subscription (%#v) demand %#v\n", subscription, count)
 	return nil, nil, state
 }
@@ -601,11 +611,11 @@ func handleConsumer(subscription GenStageSubscription, cmd stageRequestCommand, 
 		}
 
 		producer := cmd.Opt1
-		// monitor producer in order to remove this subscription
-		// if it terminated unexpectedly
-		m := state.p.MonitorProcess(producer)
-
-		//state.producers[cmd.Opt1]
+		subInternal := subscriptionInternal{
+			Subscription: subscription,
+			Producer:     producer,
+		}
+		state.producers[subscription.Ref.String()] = subInternal
 
 		if !manualDemand {
 			msg := etf.Tuple{
@@ -619,10 +629,12 @@ func handleConsumer(subscription GenStageSubscription, cmd stageRequestCommand, 
 		return etf.Atom("ok"), nil
 
 	case etf.Atom("cancel"):
+		// the subscription was canceled
 		reason, ok := cmd.Opt1.(string)
 		if !ok {
-			return nil, fmt.Errorf("Cancel reason not a string")
+			return nil, fmt.Errorf("Cancel reason is not a string")
 		}
+		state.p.DemonitorProcess(subscription.Ref)
 
 		object := state.p.object
 		err, state.internal = object.(GenStageBehaviour).HandleCanceled(subscription, reason, state.internal)
@@ -658,21 +670,21 @@ func handleProducer(subscription GenStageSubscription, cmd stageRequestCommand, 
 			if s, ok := state.consumers[subscription.Pid]; ok {
 				msg := etf.Tuple{
 					etf.Atom("$gen_consumer"),
-					etf.Tuple{subscription.Pid, s.Ref},
+					etf.Tuple{subscription.Pid, s.Subscription.Ref},
 					etf.Tuple{etf.Atom("cancel"), "resubscribed"},
 				}
 				state.p.Send(subscription.Pid, msg)
 				// notify dispatcher about cancelation the previous subscription
 				canceledSubscription := GenStageSubscription{
 					Pid: subscription.Pid,
-					Ref: s.Ref,
+					Ref: s.Subscription.Ref,
 				}
 				// cancel current demands
 				state.dispatcherState = state.options.dispatcher.Cancel(canceledSubscription, state.dispatcherState)
 				// notify dispatcher about the new subscription
 				state.dispatcherState = state.options.dispatcher.Subscribe(subscription, subscriptionOpts, state.dispatcherState)
 
-				s.Ref = subscription.Ref
+				s.Subscription = subscription
 				state.consumers[subscription.Pid] = s
 				return etf.Atom("ok"), nil
 			}
@@ -681,8 +693,8 @@ func handleProducer(subscription GenStageSubscription, cmd stageRequestCommand, 
 			// if it terminated unexpectedly
 			m := state.p.MonitorProcess(subscription.Pid)
 			s := subscriptionInternal{
-				Ref:     subscription.Ref,
-				Monitor: m,
+				Subscription: subscription,
+				Monitor:      m,
 			}
 			state.consumers[subscription.Pid] = s
 			state.dispatcherState = state.options.dispatcher.Subscribe(subscription, subscriptionOpts, state.dispatcherState)
@@ -779,18 +791,40 @@ func handleProducer(subscription GenStageSubscription, cmd stageRequestCommand, 
 }
 
 func handleDown(down downMessage, state *stateGenStage) error {
-	var err error
 	// remove subscription for producer and consumer. corner case - two
 	// processes have subscribed to each other.
 
-	// we also should clean a demand from the dispatcher if this process
-	// act as a producer
-
-	cmd := stageRequestCommand{
-		Cmd:  etf.Atom("cancel"),
-		Opt1: down.Reason,
+	// checking for subscribers (if we act as a producer).
+	// we monitor them by Pid only
+	if Pid, isPid := down.From.(etf.Pid); isPid {
+		if subInternal, ok := state.consumers[Pid]; ok {
+			// producer monitors consumer by the Pid and stores monitor reference
+			// in the subInternal struct
+			state.p.DemonitorProcess(subInternal.Monitor)
+			cmd := stageRequestCommand{
+				Cmd:  etf.Atom("cancel"),
+				Opt1: down.Reason,
+			}
+			if _, err := handleProducer(subInternal.Subscription, cmd, state); err != nil {
+				return err
+			}
+			// we also should clean the demand (which was made by this consumer) in
+			// the dispatcher if this process act as a producer
+			state.dispatcherState = state.options.dispatcher.Cancel(subInternal.Subscription, state.dispatcherState)
+		}
 	}
-	_, err = handleProducer(subscription, cmd, state)
-	_, err = handleConsumer(subscription, cmd, state)
-	return err
+
+	// checking for producers (if we act as a consumer)
+	if subInternal, ok := state.producers[down.Ref.String()]; ok {
+		cmd := stageRequestCommand{
+			Cmd:  etf.Atom("cancel"),
+			Opt1: down.Reason,
+		}
+
+		if _, err := handleConsumer(subInternal.Subscription, cmd, state); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

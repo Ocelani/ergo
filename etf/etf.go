@@ -32,6 +32,10 @@ type Ref struct {
 	ID       []uint32
 }
 
+func (ref Ref) String() string {
+	return fmt.Sprintf("%#v", ref)
+}
+
 type Function struct {
 	Arity  byte
 	Unique [16]byte
