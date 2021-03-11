@@ -18,10 +18,7 @@ type GenStageConsumerTest struct {
 
 // a simple GenStage Producer
 func (gs *GenStageProducerTest) HandleDemand(subscription GenStageSubscription, count uint, state interface{}) (error, etf.List) {
-	Events := etf.List{
-		1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
-	}
-	return nil, Events
+	return nil, nil
 }
 
 func (gs *GenStageProducerTest) HandleSubscribe(subscription GenStageSubscription, options GenStageSubscribeOptions, state interface{}) error {
@@ -49,26 +46,40 @@ func TestGenStageSimple(t *testing.T) {
 
 	producer := &GenStageProducerTest{}
 	consumer := &GenStageConsumerTest{}
-	node1.Spawn("stageProducer", ProcessOptions{}, producer, nil)
+	producerProcess, _ := node1.Spawn("stageProducer", ProcessOptions{}, producer, nil)
 	consumer1Process, _ := node1.Spawn("stageConsumer1", ProcessOptions{}, consumer, nil)
 	consumer2Process, _ := node1.Spawn("stageConsumer2", ProcessOptions{}, consumer, nil)
 	consumer3Process, _ := node1.Spawn("stageConsumer3", ProcessOptions{}, consumer, nil)
 
 	subOpts := GenStageSubscribeOptions{
-		MinDemand:    2,
-		MaxDemand:    20,
+		MinDemand:    4,
+		MaxDemand:    5,
 		ManualDemand: true,
 	}
 	consumer.Subscribe(consumer1Process, "stageProducer", subOpts)
 	sub := consumer.Subscribe(consumer2Process, "stageProducer", subOpts)
 	consumer.Subscribe(consumer3Process, "stageProducer", subOpts)
-	consumer.Subscribe(consumer3Process, "stageProducer", subOpts)
+	sub1 := consumer.Subscribe(consumer3Process, "stageProducer", subOpts)
 
 	time.Sleep(1 * time.Second)
-	consumer.Ask(consumer2Process, sub, 10)
+	fmt.Println("ASK")
+	consumer.Ask(consumer2Process, sub, 1)
+	fmt.Println("ASK1")
 
+	Events := etf.List{
+		1, 2, 3,
+	}
+	producer.SendEvents(producerProcess, Events)
+	time.Sleep(1 * time.Second)
+
+	Events = etf.List{
+		"k", "m", "c", "d", "o", "f", "v", "a",
+	}
+	producer.SendEvents(producerProcess, Events)
+	time.Sleep(1 * time.Second)
+	fmt.Println("ASK2")
+	consumer.Ask(consumer3Process, sub1, 1)
 	time.Sleep(1 * time.Second)
 	fmt.Println("OKKK")
-
 	node1.Stop()
 }

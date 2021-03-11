@@ -104,6 +104,7 @@ func (dd *dispatcherDemand) Init(opts GenStageOptions) interface{} {
 
 func (dd *dispatcherDemand) Ask(subscription GenStageSubscription, count uint, state interface{}) {
 	st := state.(*demandState)
+	fmt.Println("DISPATCHING got ASK", count)
 	demand, ok := st.demands[subscription.Pid]
 	if !ok {
 		return
@@ -127,21 +128,13 @@ func (dd *dispatcherDemand) Cancel(subscription GenStageSubscription, state inte
 }
 
 func (dd *dispatcherDemand) Dispatch(events etf.List, state interface{}) []GenStageDispatchItem {
-	fmt.Println("DISPATCHING", events)
-	// ignore empty event list
-	if len(events) == 0 {
-		return nil
-	}
-
 	st := state.(*demandState)
 	// put events into the buffer before we start dispatching
 	for e := range events {
 		select {
 		case st.events <- events[e]:
-			fmt.Println("DISPATCHING put into channel", events[e], len(st.events))
 			continue
 		default:
-			fmt.Println("DISPATCHING buffer is full", events[e], len(st.events))
 			// buffer is full
 			if st.bufferKeepLast {
 				<-st.events
@@ -153,35 +146,42 @@ func (dd *dispatcherDemand) Dispatch(events etf.List, state interface{}) []GenSt
 		break
 	}
 
-	fmt.Println("DISPATCHING ORDER", st.order)
 	// check out whether we have subscribers
 	if len(st.order) == 0 {
 		return nil
 	}
 
 	dispatchItems := []GenStageDispatchItem{}
-	for range st.order {
-		if len(st.events) == 0 {
-			// have nothing to dispatch
-			break
-		}
-		if st.i > len(st.order)-1 {
-			st.i = 0
-		}
+	for {
+		nLeft := uint(0)
+		for range st.order {
+			if st.i > len(st.order)-1 {
+				st.i = 0
+			}
+			if len(st.events) == 0 {
+				// have nothing to dispatch
+				break
+			}
 
-		pid := st.order[st.i]
-		demand := st.demands[pid]
-		st.i++
+			pid := st.order[st.i]
+			demand := st.demands[pid]
+			st.i++
 
-		if demand.n < demand.minDemand || len(st.events) < int(demand.minDemand) {
+			if demand.n == 0 || len(st.events) < int(demand.minDemand) {
+				continue
+			}
+
+			item := makeDispatchItem(st.events, demand)
+			demand.n--
+			nLeft += demand.n
+			dispatchItems = append(dispatchItems, item)
+		}
+		if nLeft > 0 && len(st.events) > 0 {
 			continue
 		}
-
-		item := makeDispatchItem(st.events, demand)
-		dispatchItems = append(dispatchItems, item)
+		break
 	}
 
-	fmt.Println("DISPATCHING ITEMS", dispatchItems)
 	return dispatchItems
 }
 
@@ -192,16 +192,13 @@ func makeDispatchItem(events chan etf.Term, d *demand) GenStageDispatchItem {
 
 	i := uint(0)
 	for {
-		if d.n == 0 || i == d.maxDemand {
-			// this subscription dont have demand anymore
-			// or limit has reached
-			break
-		}
 		select {
 		case e := <-events:
 			item.events = append(item.events, e)
-			d.n--
 			i++
+			if i == d.maxDemand {
+				break
+			}
 			continue
 		default:
 			// we dont have events in the buffer

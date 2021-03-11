@@ -344,7 +344,8 @@ func (gst *GenStage) Ask(p *Process, subscription GenStageSubscription, count ui
 		subscription: subscription,
 		count:        count,
 	}
-	p.Call(p.Self(), message)
+	xx, yy := p.Call(p.Self(), message)
+	fmt.Println("LLLLLLLLLLLLLLLL ", xx, yy)
 	return
 }
 
@@ -416,8 +417,22 @@ func (gst *GenStage) HandleCall(from etf.Tuple, message etf.Term, state interfac
 		st.options.disableForwarding = !m.forward
 		return "reply", "ok", state
 	case sendEvents:
-		// m.events
+		var deliver []GenStageDispatchItem
 		// dispatch to the subscribers
+		deliver = st.options.dispatcher.Dispatch(m.events, st.dispatcherState)
+		if len(deliver) == 0 {
+			return "reply", "ok", state
+		}
+
+		for d := range deliver {
+			fmt.Println("DEMAND DELIVERING (SendEvents)", deliver[d])
+			msg := etf.Tuple{
+				etf.Atom("$gen_consumer"),
+				etf.Tuple{deliver[d].subscription.Pid, deliver[d].subscription.Ref},
+				deliver[d].events,
+			}
+			st.p.Send(deliver[d].subscription.Pid, msg)
+		}
 		return "reply", "ok", state
 	case demandRequest:
 		subInternal, ok := st.producers[m.subscription.Ref.String()]
@@ -435,7 +450,7 @@ func (gst *GenStage) HandleCall(from etf.Tuple, message etf.Term, state interfac
 			etf.Tuple{etf.Atom("ask"), m.count},
 		}
 		st.p.Send(producer, msg)
-		return "reply", nil, state
+		return "reply", "ok", state
 
 	case cancelSubscription:
 		// if we act as a consumer within this subscription
@@ -783,14 +798,9 @@ func handleProducer(subscription GenStageSubscription, cmd stageRequestCommand, 
 		object := state.p.object
 		_, events = object.(GenStageBehaviour).HandleDemand(subscription, count, state.internal)
 
-		// register this demand in the dispatcher
+		// register this demand and trying to dispatch having events
 		dispatcher := state.options.dispatcher
 		dispatcher.Ask(subscription, count, state.dispatcherState)
-		// if HandleDemand provided events for the dispatching handle it right away
-		if len(events) == 0 {
-			return etf.Atom("ok"), nil
-		}
-
 		deliver = dispatcher.Dispatch(events, state.dispatcherState)
 		if len(deliver) == 0 {
 			return etf.Atom("ok"), nil
