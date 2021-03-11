@@ -1,7 +1,7 @@
 package ergo
 
 import (
-	"fmt"
+	//	"fmt"
 	"github.com/halturin/ergo/etf"
 )
 
@@ -72,7 +72,9 @@ type GenStageDispatchItem struct {
 	events       etf.List
 }
 
+//
 // Dispatcher Demand implementation
+//
 
 type demand struct {
 	subscription GenStageSubscription
@@ -104,7 +106,6 @@ func (dd *dispatcherDemand) Init(opts GenStageOptions) interface{} {
 
 func (dd *dispatcherDemand) Ask(subscription GenStageSubscription, count uint, state interface{}) {
 	st := state.(*demandState)
-	fmt.Println("DISPATCHING got ASK", count)
 	demand, ok := st.demands[subscription.Pid]
 	if !ok {
 		return
@@ -222,7 +223,9 @@ func (dd *dispatcherDemand) Subscribe(subscription GenStageSubscription, opts Ge
 	return
 }
 
+//
 // Dispatcher Broadcast implementation
+//
 
 func (db *dispatcherBroadcast) Init(opts GenStageOptions) interface{} {
 	return nil

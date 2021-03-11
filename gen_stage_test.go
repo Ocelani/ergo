@@ -18,17 +18,18 @@ type GenStageConsumerTest struct {
 
 // a simple GenStage Producer
 func (gs *GenStageProducerTest) HandleDemand(subscription GenStageSubscription, count uint, state interface{}) (error, etf.List) {
+	fmt.Printf("producer got demand %d from sub %v\n", count, subscription)
 	return nil, nil
 }
 
 func (gs *GenStageProducerTest) HandleSubscribe(subscription GenStageSubscription, options GenStageSubscribeOptions, state interface{}) error {
-	fmt.Printf("got producer subs %#v \n", options)
+	fmt.Printf("producer got sub %v with opt %v\n", subscription, options)
 	return nil
 }
 
 // a simple GenStage Consumer
 func (gs *GenStageConsumerTest) HandleEvents(subscription GenStageSubscription, events etf.List, state interface{}) error {
-	fmt.Println("AAAAAAAAA GOT EVENTS", events)
+	fmt.Println("consumer got events", events)
 	return nil
 }
 
@@ -62,9 +63,7 @@ func TestGenStageSimple(t *testing.T) {
 	sub1 := consumer.Subscribe(consumer3Process, "stageProducer", subOpts)
 
 	time.Sleep(1 * time.Second)
-	fmt.Println("ASK")
 	consumer.Ask(consumer2Process, sub, 1)
-	fmt.Println("ASK1")
 
 	Events := etf.List{
 		1, 2, 3,
@@ -77,9 +76,7 @@ func TestGenStageSimple(t *testing.T) {
 	}
 	producer.SendEvents(producerProcess, Events)
 	time.Sleep(1 * time.Second)
-	fmt.Println("ASK2")
-	xx := consumer.Ask(consumer3Process, sub1, 1)
+	consumer.Ask(consumer3Process, sub1, 1)
 	time.Sleep(1 * time.Second)
-	fmt.Println("OKKK", xx)
 	node1.Stop()
 }

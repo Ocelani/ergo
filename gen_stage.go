@@ -450,7 +450,6 @@ func (gst *GenStage) HandleCall(from etf.Tuple, message etf.Term, state interfac
 		}
 
 		for d := range deliver {
-			fmt.Println("DEMAND DELIVERING (SendEvents)", deliver[d])
 			msg := etf.Tuple{
 				etf.Atom("$gen_consumer"),
 				etf.Tuple{deliver[d].subscription.Pid, deliver[d].subscription.Ref},
@@ -868,7 +867,6 @@ func handleProducer(subscription GenStageSubscription, cmd stageRequestCommand, 
 		}
 
 		for d := range deliver {
-			fmt.Println("DEMAND DELIVERING", deliver[d])
 			msg := etf.Tuple{
 				etf.Atom("$gen_consumer"),
 				etf.Tuple{deliver[d].subscription.Pid, deliver[d].subscription.Ref},
