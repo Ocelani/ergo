@@ -78,8 +78,8 @@ func TestGenStageSimple(t *testing.T) {
 	producer.SendEvents(producerProcess, Events)
 	time.Sleep(1 * time.Second)
 	fmt.Println("ASK2")
-	consumer.Ask(consumer3Process, sub1, 1)
+	xx := consumer.Ask(consumer3Process, sub1, 1)
 	time.Sleep(1 * time.Second)
-	fmt.Println("OKKK")
+	fmt.Println("OKKK", xx)
 	node1.Stop()
 }

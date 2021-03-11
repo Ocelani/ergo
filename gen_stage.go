@@ -160,6 +160,8 @@ type stateGenStage struct {
 	producers map[string]subscriptionInternal
 	// keep our subscribers
 	consumers map[etf.Pid]subscriptionInternal
+	// number of requested events by as a consumer.
+	events int
 }
 
 type stageRequestCommandCancel struct {
@@ -222,14 +224,17 @@ type sendEvents struct {
 
 // GenStage methods
 
-// DisableAutoDemand means that demand must be sent to producers explicitly via Ask method. This
+// DisableAutoDemand means that demand must be sent to producers explicitly using Ask method. This
 // mode can be used when a special behaviour is desired.
 func (gst *GenStage) DisableAutoDemand(p *Process, subscription GenStageSubscription) error {
 	message := setManualDemand{
 		subscription: subscription,
 		enable:       false,
 	}
-	_, err := p.Call(p.Self(), message)
+	val, err := p.Call(p.Self(), message)
+	if err, ok := val.(error); ok {
+		return err
+	}
 	return err
 }
 
@@ -242,7 +247,10 @@ func (gst *GenStage) EnableAutoDemand(p *Process, subscription GenStageSubscript
 		subscription: subscription,
 		enable:       false,
 	}
-	_, err := p.Call(p.Self(), message)
+	val, err := p.Call(p.Self(), message)
+	if err, ok := val.(error); ok {
+		return err
+	}
 	return err
 }
 
@@ -252,7 +260,10 @@ func (gst *GenStage) EnableForwardDemand(p *Process) error {
 	message := setForwardDemand{
 		forward: true,
 	}
-	_, err := p.Call(p.Self(), message)
+	val, err := p.Call(p.Self(), message)
+	if err, ok := val.(error); ok {
+		return err
+	}
 	return err
 }
 
@@ -263,7 +274,10 @@ func (gst *GenStage) DisableForwardDemand(p *Process) error {
 	message := setForwardDemand{
 		forward: false,
 	}
-	_, err := p.Call(p.Self(), message)
+	val, err := p.Call(p.Self(), message)
+	if err, ok := val.(error); ok {
+		return err
+	}
 	return err
 }
 
@@ -272,7 +286,10 @@ func (gst *GenStage) SendEvents(p *Process, events etf.List) error {
 	message := sendEvents{
 		events: events,
 	}
-	_, err := p.Call(p.Self(), message)
+	val, err := p.Call(p.Self(), message)
+	if err, ok := val.(error); ok {
+		return err
+	}
 	return err
 }
 
@@ -280,13 +297,17 @@ func (gst *GenStage) SendEvents(p *Process, events etf.List) error {
 // GenStageCancelPermanent (default) - consumer exits when the producer cancels or exits
 // GenStageCancelTransient - consumer exits only if reason is not normal, shutdown, or {shutdown, reason}
 // GenStageCancelTemporary - never exits
-func (gst *GenStage) SetCancelMode(p *Process, subscription GenStageSubscription, cancel GenStageCancelMode) {
+func (gst *GenStage) SetCancelMode(p *Process, subscription GenStageSubscription, cancel GenStageCancelMode) error {
 	message := setCancelMode{
 		subscription: subscription,
 		cancel:       cancel,
 	}
-	p.Call(p.Self(), message)
-	return
+
+	val, err := p.Call(p.Self(), message)
+	if err, ok := val.(error); ok {
+		return err
+	}
+	return err
 }
 
 // Subscribe subscribes to the given producer. HandleSubscribed callback will be invoked on a consumer stage once a request for the subscription is sent. If something went wrong on a producer side the callback HandleCancel will be invoked with a reason of cancelation.
@@ -339,24 +360,29 @@ func (gst *GenStage) Subscribe(p *Process, producer etf.Term, opts GenStageSubsc
 
 // Ask makes a demand request for the given subscription. This function must only be
 // used in the cases when a consumer sets a subscription to manual mode via DisableAutoDemand
-func (gst *GenStage) Ask(p *Process, subscription GenStageSubscription, count uint) {
+func (gst *GenStage) Ask(p *Process, subscription GenStageSubscription, count uint) error {
 	message := demandRequest{
 		subscription: subscription,
 		count:        count,
 	}
-	xx, yy := p.Call(p.Self(), message)
-	fmt.Println("LLLLLLLLLLLLLLLL ", xx, yy)
-	return
+	val, err := p.Call(p.Self(), message)
+	if err, ok := val.(error); ok {
+		return err
+	}
+	return err
 }
 
 // Cancel
-func (gst *GenStage) Cancel(p *Process, subscription GenStageSubscription, reason string) {
+func (gst *GenStage) Cancel(p *Process, subscription GenStageSubscription, reason string) error {
 	message := cancelSubscription{
 		subscription: subscription,
 		reason:       reason,
 	}
-	p.Call(p.Self(), message)
-	return
+	val, err := p.Call(p.Self(), message)
+	if err, ok := val.(error); ok {
+		return err
+	}
+	return err
 }
 
 //
@@ -391,7 +417,6 @@ func (gst *GenStage) Init(p *Process, args ...interface{}) interface{} {
 }
 
 func (gst *GenStage) HandleCall(from etf.Tuple, message etf.Term, state interface{}) (string, etf.Term, interface{}) {
-	fmt.Println("Stage call")
 	st := state.(*stateGenStage)
 
 	switch m := message.(type) {
@@ -450,6 +475,7 @@ func (gst *GenStage) HandleCall(from etf.Tuple, message etf.Term, state interfac
 			etf.Tuple{etf.Atom("ask"), m.count},
 		}
 		st.p.Send(producer, msg)
+		st.events += int(m.count)
 		return "reply", "ok", state
 
 	case cancelSubscription:
@@ -511,8 +537,6 @@ func (gst *GenStage) HandleInfo(message etf.Term, state interface{}) (string, in
 	var d downMessage
 	var err error
 
-	fmt.Println("Stage info")
-
 	st := state.(*stateGenStage)
 
 	// check if we got a 'DOWN' mesaage
@@ -545,7 +569,7 @@ func (gst *GenStage) HandleInfo(message etf.Term, state interface{}) (string, in
 }
 
 func (gst *GenStage) Terminate(reason string, state interface{}) {
-	fmt.Println("Stage terminate")
+	fmt.Println("Stage terminate", reason)
 	return
 }
 
@@ -632,7 +656,6 @@ func handleRequest(m stageMessage, state *stateGenStage) (etf.Term, error) {
 }
 
 func handleConsumer(subscription GenStageSubscription, cmd stageRequestCommand, state *stateGenStage) (etf.Term, error) {
-	fmt.Printf("handleConsumer %#v\n", cmd)
 	var subscriptionOpts GenStageSubscribeOptions
 	var err error
 	var manualDemand bool
@@ -641,9 +664,39 @@ func handleConsumer(subscription GenStageSubscription, cmd stageRequestCommand, 
 	case etf.Atom("events"):
 		events := cmd.Opt1.(etf.List)
 		object := state.p.object
+		numEvents := len(events)
+
+		state.events--
+		if state.events < 0 {
+			return nil, fmt.Errorf("got %d events which haven't bin requested", numEvents)
+		}
+		subInternal, ok := state.producers[subscription.Ref.String()]
+		if !ok {
+			fmt.Printf("Warning! got %d events for unknown subscription %#v\n", numEvents, subscription)
+			return etf.Atom("ok"), nil
+		}
+		if numEvents < int(subInternal.Options.MinDemand) {
+			return nil, fmt.Errorf("got %d events which is less than min %d", numEvents, subInternal.Options.MinDemand)
+		}
+		if numEvents > int(subInternal.Options.MaxDemand) {
+			return nil, fmt.Errorf("got %d events which is more than max %d", numEvents, subInternal.Options.MaxDemand)
+		}
+
 		err = object.(GenStageBehaviour).HandleEvents(subscription, events, state.internal)
 		if err != nil {
 			return nil, err
+		}
+
+		// if subscription has auto demand we should request yet another
+		// bunch of events
+		if state.events < 2 && !subInternal.Options.ManualDemand {
+			msg := etf.Tuple{
+				etf.Atom("$gen_producer"),
+				etf.Tuple{subscription.Pid, subscription.Ref},
+				etf.Tuple{etf.Atom("ask"), 2},
+			}
+			state.p.Send(subInternal.Producer, msg)
+			state.events = state.events + 2
 		}
 		return etf.Atom("ok"), nil
 
@@ -658,6 +711,7 @@ func handleConsumer(subscription GenStageSubscription, cmd stageRequestCommand, 
 		if err != nil {
 			return nil, err
 		}
+		subscriptionOpts.ManualDemand = manualDemand
 
 		producer := cmd.Opt1
 		subInternal := subscriptionInternal{
@@ -671,9 +725,10 @@ func handleConsumer(subscription GenStageSubscription, cmd stageRequestCommand, 
 			msg := etf.Tuple{
 				etf.Atom("$gen_producer"),
 				etf.Tuple{subscription.Pid, subscription.Ref},
-				etf.Tuple{etf.Atom("ask"), subscriptionOpts.MaxDemand},
+				etf.Tuple{etf.Atom("ask"), 2},
 			}
 			state.p.Send(producer, msg)
+			state.events = state.events + 2
 		}
 
 		return etf.Atom("ok"), nil
@@ -696,7 +751,6 @@ func handleConsumer(subscription GenStageSubscription, cmd stageRequestCommand, 
 }
 
 func handleProducer(subscription GenStageSubscription, cmd stageRequestCommand, state *stateGenStage) (etf.Term, error) {
-	fmt.Printf("handleProducer %#v\n", cmd)
 	var subscriptionOpts GenStageSubscribeOptions
 	var err error
 
@@ -766,10 +820,17 @@ func handleProducer(subscription GenStageSubscription, cmd stageRequestCommand, 
 	case etf.Atom("ask"):
 		var events etf.List
 		var deliver []GenStageDispatchItem
-		// {ask, Count}
-		count, ok := cmd.Opt1.(uint)
-		if !ok {
-			return nil, fmt.Errorf("Demand has wrong value. Expected uint")
+		var count uint
+		switch c := cmd.Opt1.(type) {
+		case int:
+			count = uint(c)
+		case uint:
+			count = c
+		default:
+			return nil, fmt.Errorf("Demand has wrong value %#v. Expected positive integer", cmd.Opt1)
+		}
+		if count < 1 {
+			return nil, fmt.Errorf("Demand has wrong value %#v. Expected positive integer", cmd.Opt1)
 		}
 
 		if state.options.disableForwarding {
