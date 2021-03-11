@@ -15,26 +15,26 @@ type GenStageOptions struct {
 
 	// If this stage acts as a consumer you can to define producers
 	// this stage should subscribe to.
-	// subscribeTo is a list of GenStageSubscribeTo. Each element represents
+	// SubscribeTo is a list of GenStageSubscribeTo. Each element represents
 	// a producer (etf.Pid or registered name) and subscription options.
-	subscribeTo []GenStageSubscribeTo
+	SubscribeTo []GenStageSubscribeTo
 
 	// Options below are for the stage that acts as a producer.
 
-	// the demand is always forwarded to the HandleDemand callback.
+	// DisableForwarding. the demand is always forwarded to the HandleDemand callback.
 	// When this options is set to 'true', demands are accumulated until mode is
 	// set back to 'false' via DisableDemandAccumulating method
-	disableForwarding bool
+	DisableForwarding bool
 
-	// bufferSize the size of the buffer to store events without demand.
+	// BufferSize the size of the buffer to store events without demand.
 	// default value = defaultDispatcherBufferSize
-	bufferSize uint
+	BufferSize uint
 
-	// bufferKeepLast defines whether the first or last entries should be
+	// BufferKeepLast defines whether the first or last entries should be
 	// kept on the buffer in case the buffer size is exceeded.
-	bufferKeepLast bool
+	BufferKeepLast bool
 
-	dispatcher GenStageDispatcherBehaviour
+	Dispatcher GenStageDispatcherBehaviour
 }
 
 const (
@@ -138,6 +138,14 @@ type GenStageSubscribeOptions struct {
 	// "shutdown", or {"shutdown", _}
 	// GenStageCancelTemporary the consumer never exits
 	Cancel GenStageCancelMode `etf:"cancel"`
+
+	// Partition is defined the number of partition this subscription should belongs to.
+	// This option uses in the DispatcherPartition
+	Partition uint `etf:"partition"`
+
+	// Extra is intended to be a custom set of options for the custom implementation
+	// of GenStageDispatcherBehaviour
+	Extra etf.Term `etf:"extra"`
 }
 
 type GenStageCancelReason struct {
@@ -397,18 +405,18 @@ func (gst *GenStage) Init(p *Process, args ...interface{}) interface{} {
 
 	state.p = p
 	state.options, state.internal = p.object.(GenStageBehaviour).InitStage(p, args)
-	if state.options.bufferSize == 0 {
-		state.options.bufferSize = defaultDispatcherBufferSize
+	if state.options.BufferSize == 0 {
+		state.options.BufferSize = defaultDispatcherBufferSize
 	}
 
 	// if dispatcher wasn't specified create a default one GenStageDispatcherDemand
-	if state.options.dispatcher == nil {
-		state.options.dispatcher = CreateGenStageDispatcher(GenStageDispatcherDemand)
+	if state.options.Dispatcher == nil {
+		state.options.Dispatcher = CreateGenStageDispatcherDemand()
 	}
 
-	state.dispatcherState = state.options.dispatcher.Init(state.options)
-	if len(state.options.subscribeTo) > 0 {
-		for _, s := range state.options.subscribeTo {
+	state.dispatcherState = state.options.Dispatcher.Init(state.options)
+	if len(state.options.SubscribeTo) > 0 {
+		for _, s := range state.options.SubscribeTo {
 			gst.Subscribe(p, s.Producer, s.Options)
 		}
 	}
@@ -439,12 +447,12 @@ func (gst *GenStage) HandleCall(from etf.Tuple, message etf.Term, state interfac
 		return "reply", "ok", state
 
 	case setForwardDemand:
-		st.options.disableForwarding = !m.forward
+		st.options.DisableForwarding = !m.forward
 		return "reply", "ok", state
 	case sendEvents:
 		var deliver []GenStageDispatchItem
 		// dispatch to the subscribers
-		deliver = st.options.dispatcher.Dispatch(m.events, st.dispatcherState)
+		deliver = st.options.Dispatcher.Dispatch(m.events, st.dispatcherState)
 		if len(deliver) == 0 {
 			return "reply", "ok", state
 		}
@@ -780,9 +788,9 @@ func handleProducer(subscription GenStageSubscription, cmd stageRequestCommand, 
 					Ref: s.Subscription.Ref,
 				}
 				// cancel current demands
-				state.options.dispatcher.Cancel(canceledSubscription, state.dispatcherState)
+				state.options.Dispatcher.Cancel(canceledSubscription, state.dispatcherState)
 				// notify dispatcher about the new subscription
-				state.options.dispatcher.Subscribe(subscription, subscriptionOpts, state.dispatcherState)
+				state.options.Dispatcher.Subscribe(subscription, subscriptionOpts, state.dispatcherState)
 
 				s.Subscription = subscription
 				state.consumers[subscription.Pid] = s
@@ -798,7 +806,7 @@ func handleProducer(subscription GenStageSubscription, cmd stageRequestCommand, 
 				Options:      subscriptionOpts,
 			}
 			state.consumers[subscription.Pid] = s
-			state.options.dispatcher.Subscribe(subscription, subscriptionOpts, state.dispatcherState)
+			state.options.Dispatcher.Subscribe(subscription, subscriptionOpts, state.dispatcherState)
 			return etf.Atom("ok"), nil
 
 		case ErrNotAProducer:
@@ -829,10 +837,11 @@ func handleProducer(subscription GenStageSubscription, cmd stageRequestCommand, 
 			return nil, fmt.Errorf("Demand has wrong value %#v. Expected positive integer", cmd.Opt1)
 		}
 		if count < 1 {
-			return nil, fmt.Errorf("Demand has wrong value %#v. Expected positive integer", cmd.Opt1)
+			// just ignore it
+			return etf.Atom("ok"), nil
 		}
 
-		if state.options.disableForwarding {
+		if state.options.DisableForwarding {
 			d := demandRequest{
 				subscription: subscription,
 				count:        count,
@@ -859,7 +868,7 @@ func handleProducer(subscription GenStageSubscription, cmd stageRequestCommand, 
 		_, events = object.(GenStageBehaviour).HandleDemand(subscription, count, state.internal)
 
 		// register this demand and trying to dispatch having events
-		dispatcher := state.options.dispatcher
+		dispatcher := state.options.Dispatcher
 		dispatcher.Ask(subscription, count, state.dispatcherState)
 		deliver = dispatcher.Dispatch(events, state.dispatcherState)
 		if len(deliver) == 0 {
@@ -880,11 +889,11 @@ func handleProducer(subscription GenStageSubscription, cmd stageRequestCommand, 
 	case etf.Atom("cancel"):
 		var e error
 		// handle this cancelation in the dispatcher
-		dispatcher := state.options.dispatcher
+		dispatcher := state.options.Dispatcher
 		dispatcher.Cancel(subscription, state.dispatcherState)
-		// handle it in a GenStage callback
 		object := state.p.object
 		reason := cmd.Opt1.(string)
+		// handle it in a GenStage callback
 		e = object.(GenStageBehaviour).HandleCancel(subscription, reason, state.internal)
 		delete(state.consumers, subscription.Pid)
 		return etf.Atom("ok"), e

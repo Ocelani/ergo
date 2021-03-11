@@ -3,10 +3,12 @@ package ergo
 import (
 	//	"fmt"
 	"github.com/halturin/ergo/etf"
+	"math/rand"
 )
 
 // GenStageDispatcherBehaviour defined interface for the dispatcher
-// implementation.
+// implementation. To create a custom dispatcher you should implement this interface
+// and use it in GenStageOptions as a Dispatcher
 type GenStageDispatcherBehaviour interface {
 	// InitStageDispatcher(opts)
 	Init(opts GenStageOptions) interface{}
@@ -27,44 +29,42 @@ type GenStageDispatcherBehaviour interface {
 type GenStageDispatcher int
 type dispatcherDemand struct{}
 type dispatcherBroadcast struct{}
-type dispatcherPartition struct{}
+type dispatcherPartition struct {
+	n    uint
+	hash func(etf.Term) uint
+}
 
-const (
-	GenStageDispatcherDemand    GenStageDispatcher = 0
-	GenStageDispatcherBroadcast GenStageDispatcher = 1
-	GenStageDispatcherPartition GenStageDispatcher = 2
-)
+// CreateGenStageDispatcherDemand creates dispatcher that sends batches
+// to the highest demand. This is the default dispatcher used
+// by GenStage. In order to avoid greedy consumers, it is recommended
+// that all consumers have exactly the same maximum demand.
+func CreateGenStageDispatcherDemand() GenStageDispatcherBehaviour {
+	return &dispatcherDemand{}
+}
 
-// CreateGenStageDispatcher creates a new dispatcher with a given type.
-// There are 3 type of dispatchers we have implemented
-//		GenStageDispatcherDemand
-//			A dispatcher that sends batches to the highest demand.
-//			This is the default dispatcher used by GenStage. In
-//			order to avoid greedy consumers, it is recommended
-//			that all consumers have exactly the same maximum demand.
-//		GenStageDispatcherBroadcast
-//			A dispatcher that accumulates demand from all consumers
-//			before broadcasting events to all of them.
-//			This dispatcher guarantees that events are dispatched to
-//			all consumers without exceeding the demand of any given consumer.
-//			The demand is only sent upstream once all consumers ask for data.
-//		GenStageDispatcherPartition
-//			A dispatcher that sends events according to partitions.
-//			Keep in mind that, if partitions are not evenly distributed,
-//			a backed-up partition will slow all other ones
-//
-//		To create a custom dispatcher you should implement GenStageDispatcherBehaviour interface
-func CreateGenStageDispatcher(dispatcher GenStageDispatcher) GenStageDispatcherBehaviour {
-	switch dispatcher {
-	case GenStageDispatcherDemand:
-		return &dispatcherDemand{}
-	case GenStageDispatcherBroadcast:
-		return &dispatcherBroadcast{}
-	case GenStageDispatcherPartition:
-		return &dispatcherPartition{}
+// CreateGenStageDispatcherBroadcast creates dispatcher that accumulates
+// demand from all consumers before broadcasting events to all of them.
+// This dispatcher guarantees that events are dispatched to
+// all consumers without exceeding the demand of any given consumer.
+// The demand is only sent upstream once all consumers ask for data.
+func CreateGenStageDispatcherBroadcast() GenStageDispatcherBehaviour {
+	return &dispatcherBroadcast{}
+}
+
+// CreateGenStageDispatcherPartition creates dispatcher that sends
+// events according to partitions. Number of partitions 'n' must be > 0.
+// If 'hash' is nil the random partition will be used on every event.
+func CreateGenStageDispatcherPartition(n uint, hash func(etf.Term) uint) GenStageDispatcherBehaviour {
+	if hash == nil {
+		hash = func(event etf.Term) uint {
+			p := rand.Intn(int(n) - 1)
+			return uint(p)
+		}
 	}
-
-	return nil
+	return &dispatcherPartition{
+		n:    n,
+		hash: hash,
+	}
 }
 
 type GenStageDispatchItem struct {
@@ -97,9 +97,9 @@ func (dd *dispatcherDemand) Init(opts GenStageOptions) interface{} {
 	state := &demandState{
 		demands:        make(map[etf.Pid]*demand),
 		i:              0,
-		events:         make(chan etf.Term, opts.bufferSize),
-		bufferSize:     opts.bufferSize,
-		bufferKeepLast: opts.bufferKeepLast,
+		events:         make(chan etf.Term, opts.BufferSize),
+		bufferSize:     opts.BufferSize,
+		bufferKeepLast: opts.BufferKeepLast,
 	}
 	return state
 }
@@ -247,10 +247,18 @@ func (db *dispatcherBroadcast) Subscribe(subscription GenStageSubscription, opts
 	return
 }
 
+//
 // Dispatcher Partition implementation
-
+//
 func (dp *dispatcherPartition) Init(opts GenStageOptions) interface{} {
-	return nil
+	state := &demandState{
+		demands:        make(map[etf.Pid]*demand),
+		i:              0,
+		events:         make(chan etf.Term, opts.BufferSize),
+		bufferSize:     opts.BufferSize,
+		bufferKeepLast: opts.BufferKeepLast,
+	}
+	return state
 }
 
 func (dp *dispatcherPartition) Ask(subscription GenStageSubscription, count uint, state interface{}) {
