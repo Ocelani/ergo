@@ -82,7 +82,7 @@ type demand struct {
 	subscription GenStageSubscription
 	minDemand    uint
 	maxDemand    uint
-	n            uint
+	count        uint
 	partition    uint
 }
 
@@ -108,6 +108,21 @@ type partitionState struct {
 }
 
 type broadcastState struct {
+	demands map[etf.Pid]*demand
+	// maxDemand should be a min value of all MaxDemand
+	maxDemand uint
+
+	// minDemand should be a max value of all MinDemand
+	minDemand uint
+
+	// Number of broadcast iteration could be done.
+	// Computes on every Ask/Cancel call as a minimum value
+	// among the all demands.
+	broadcasts uint
+
+	events         chan etf.Term
+	bufferSize     uint
+	bufferKeepLast bool
 }
 
 func (dd *dispatcherDemand) Init(opts GenStageOptions) interface{} {
@@ -127,7 +142,7 @@ func (dd *dispatcherDemand) Ask(subscription GenStageSubscription, count uint, s
 	if !ok {
 		return
 	}
-	demand.n += count
+	demand.count += count
 	return
 }
 
@@ -171,7 +186,7 @@ func (dd *dispatcherDemand) Dispatch(events etf.List, state interface{}) []GenSt
 
 	dispatchItems := []GenStageDispatchItem{}
 	for {
-		nLeft := uint(0)
+		countLeft := uint(0)
 		for range st.order {
 			if st.i > len(st.order)-1 {
 				st.i = 0
@@ -185,16 +200,16 @@ func (dd *dispatcherDemand) Dispatch(events etf.List, state interface{}) []GenSt
 			demand := st.demands[pid]
 			st.i++
 
-			if demand.n == 0 || len(st.events) < int(demand.minDemand) {
+			if demand.count == 0 || len(st.events) < int(demand.minDemand) {
 				continue
 			}
 
 			item := makeDispatchItem(st.events, demand)
-			demand.n--
-			nLeft += demand.n
+			demand.count--
+			countLeft += demand.count
 			dispatchItems = append(dispatchItems, item)
 		}
-		if nLeft > 0 && len(st.events) > 0 {
+		if countLeft > 0 && len(st.events) > 0 {
 			continue
 		}
 		break
@@ -220,22 +235,71 @@ func (dd *dispatcherDemand) Subscribe(subscription GenStageSubscription, opts Ge
 //
 
 func (db *dispatcherBroadcast) Init(opts GenStageOptions) interface{} {
-	return nil
+	state := &broadcastState{
+		demands:        make(map[etf.Pid]*demand),
+		events:         make(chan etf.Term, opts.BufferSize),
+		bufferSize:     opts.BufferSize,
+		bufferKeepLast: opts.BufferKeepLast,
+	}
+	return state
 }
 
 func (db *dispatcherBroadcast) Ask(subscription GenStageSubscription, count uint, state interface{}) {
+	st := state.(*broadcastState)
+	demand, ok := st.demands[subscription.Pid]
+	if !ok {
+		return
+	}
+	demand.count += count
+	st.broadcasts = minCountDemand(st.demands)
 	return
 }
 
 func (db *dispatcherBroadcast) Cancel(subscription GenStageSubscription, state interface{}) {
+	st := state.(*broadcastState)
+	delete(st.demands, subscription.Pid)
+	st.broadcasts = minCountDemand(st.demands)
 	return
 }
 
 func (db *dispatcherBroadcast) Dispatch(events etf.List, state interface{}) []GenStageDispatchItem {
+	//FIXME
 	return nil
 }
 
 func (db *dispatcherBroadcast) Subscribe(subscription GenStageSubscription, opts GenStageSubscribeOptions, state interface{}) error {
+	st := state.(*broadcastState)
+	newDemand := &demand{
+		subscription: subscription,
+		minDemand:    opts.MinDemand,
+		maxDemand:    opts.MaxDemand,
+	}
+	if len(st.demands) == 0 {
+		st.minDemand = opts.MinDemand
+		st.maxDemand = opts.MaxDemand
+		st.demands[subscription.Pid] = newDemand
+		return nil
+	}
+
+	// check if min and max outside of the having range
+	// defined by the previous subscriptions
+	if opts.MaxDemand < st.minDemand {
+		return fmt.Errorf("broadcast dispatcher: MaxDemand (%d) outside of the accepted range (%d..%d)", opts.MaxDemand, st.minDemand, st.maxDemand)
+	}
+	if opts.MinDemand > st.maxDemand {
+		return fmt.Errorf("broadcast dispatcher: MinDemand (%d) outside of the accepted range (%d..%d)", opts.MinDemand, st.minDemand, st.maxDemand)
+	}
+
+	// adjust the range
+	if opts.MaxDemand < st.maxDemand {
+		st.maxDemand = opts.MaxDemand
+	}
+	if opts.MinDemand > st.minDemand {
+		st.minDemand = opts.MinDemand
+	}
+	st.demands[subscription.Pid] = newDemand
+	// we should stop broadcast events until this subscription make a demand
+	st.broadcasts = 0
 	return nil
 }
 
@@ -263,7 +327,7 @@ func (dp *dispatcherPartition) Ask(subscription GenStageSubscription, count uint
 	if !ok {
 		return
 	}
-	demand.n += count
+	demand.count += count
 	return
 }
 
@@ -317,7 +381,7 @@ func (dp *dispatcherPartition) Dispatch(events etf.List, state interface{}) []Ge
 		}
 
 		for {
-			nLeft := uint(0)
+			countLeft := uint(0)
 			for range st.order[partition] {
 				order_index := st.i[partition]
 				if order_index > len(st.order[partition])-1 {
@@ -332,23 +396,21 @@ func (dp *dispatcherPartition) Dispatch(events etf.List, state interface{}) []Ge
 				demand := st.demands[pid]
 				st.i[partition] = order_index + 1
 
-				if demand.n == 0 || len(st.events[partition]) < int(demand.minDemand) {
+				if demand.count == 0 || len(st.events[partition]) < int(demand.minDemand) {
 					continue
 				}
 
 				item := makeDispatchItem(st.events[partition], demand)
-				demand.n--
-				nLeft += demand.n
+				demand.count--
+				countLeft += demand.count
 				dispatchItems = append(dispatchItems, item)
 			}
-			if nLeft > 0 && len(st.events[partition]) > 0 {
+			if countLeft > 0 && len(st.events[partition]) > 0 {
 				continue
 			}
 			break
 		}
-
 	}
-
 	return dispatchItems
 }
 
@@ -367,7 +429,7 @@ func (dp *dispatcherPartition) Subscribe(subscription GenStageSubscription, opts
 	return nil
 }
 
-// private functions
+// helpers
 
 func makeDispatchItem(events chan etf.Term, d *demand) GenStageDispatchItem {
 	item := GenStageDispatchItem{
@@ -387,9 +449,22 @@ func makeDispatchItem(events chan etf.Term, d *demand) GenStageDispatchItem {
 		default:
 			// we dont have events in the buffer
 		}
-
 		break
 	}
-
 	return item
+}
+
+func minCountDemand(demands map[etf.Pid]*demand) uint {
+	if len(demands) == 0 {
+		return uint(0)
+	}
+
+	minCount := uint(100)
+
+	for _, d := range demands {
+		if d.count < minCount {
+			minCount = d.count
+		}
+	}
+	return minCount
 }

@@ -770,6 +770,16 @@ func handleProducer(subscription GenStageSubscription, cmd stageRequestCommand, 
 			return nil, err
 		}
 
+		if subscriptionOpts.MinDemand > subscriptionOpts.MaxDemand {
+			msg := etf.Tuple{
+				etf.Atom("$gen_consumer"),
+				etf.Tuple{subscription.Pid, subscription.Ref},
+				etf.Tuple{etf.Atom("cancel"), fmt.Errorf("MinDemand greater MaxDemand")},
+			}
+			state.p.Send(subscription.Pid, msg)
+			return etf.Atom("ok"), nil
+		}
+
 		object := state.p.object
 		err = object.(GenStageBehaviour).HandleSubscribe(subscription, subscriptionOpts, state.internal)
 
