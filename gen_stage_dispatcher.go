@@ -1,7 +1,7 @@
 package ergo
 
 import (
-	//	"fmt"
+	"fmt"
 	"github.com/halturin/ergo/etf"
 	"math/rand"
 )
@@ -23,7 +23,7 @@ type GenStageDispatcherBehaviour interface {
 	Dispatch(events etf.List, state interface{}) []GenStageDispatchItem
 
 	// Subscribe called every time the producer gets a new subscriber
-	Subscribe(subscription GenStageSubscription, opts GenStageSubscribeOptions, state interface{})
+	Subscribe(subscription GenStageSubscription, opts GenStageSubscribeOptions, state interface{}) error
 }
 
 type GenStageDispatcher int
@@ -31,10 +31,10 @@ type dispatcherDemand struct{}
 type dispatcherBroadcast struct{}
 type dispatcherPartition struct {
 	n    uint
-	hash func(etf.Term) uint
+	hash func(etf.Term) int
 }
 
-// CreateGenStageDispatcherDemand creates dispatcher that sends batches
+// CreateGenStageDispatcherDemand creates a dispatcher that sends batches
 // to the highest demand. This is the default dispatcher used
 // by GenStage. In order to avoid greedy consumers, it is recommended
 // that all consumers have exactly the same maximum demand.
@@ -42,7 +42,7 @@ func CreateGenStageDispatcherDemand() GenStageDispatcherBehaviour {
 	return &dispatcherDemand{}
 }
 
-// CreateGenStageDispatcherBroadcast creates dispatcher that accumulates
+// CreateGenStageDispatcherBroadcast creates a dispatcher that accumulates
 // demand from all consumers before broadcasting events to all of them.
 // This dispatcher guarantees that events are dispatched to
 // all consumers without exceeding the demand of any given consumer.
@@ -51,14 +51,16 @@ func CreateGenStageDispatcherBroadcast() GenStageDispatcherBehaviour {
 	return &dispatcherBroadcast{}
 }
 
-// CreateGenStageDispatcherPartition creates dispatcher that sends
+// CreateGenStageDispatcherPartition creates a dispatcher that sends
 // events according to partitions. Number of partitions 'n' must be > 0.
+// 'hash' should return number within range [0,n). Value outside of this range
+// is discarding event.
 // If 'hash' is nil the random partition will be used on every event.
-func CreateGenStageDispatcherPartition(n uint, hash func(etf.Term) uint) GenStageDispatcherBehaviour {
+func CreateGenStageDispatcherPartition(n uint, hash func(etf.Term) int) GenStageDispatcherBehaviour {
 	if hash == nil {
-		hash = func(event etf.Term) uint {
+		hash = func(event etf.Term) int {
 			p := rand.Intn(int(n) - 1)
-			return uint(p)
+			return p
 		}
 	}
 	return &dispatcherPartition{
@@ -81,6 +83,7 @@ type demand struct {
 	minDemand    uint
 	maxDemand    uint
 	n            uint
+	partition    uint
 }
 
 type demandState struct {
@@ -91,6 +94,20 @@ type demandState struct {
 	events         chan etf.Term
 	bufferSize     uint
 	bufferKeepLast bool
+}
+
+type partitionState struct {
+	demands map[etf.Pid]*demand
+	// partitioned
+	order  [][]etf.Pid
+	i      []int
+	events []chan etf.Term
+
+	bufferSize     uint
+	bufferKeepLast bool
+}
+
+type broadcastState struct {
 }
 
 func (dd *dispatcherDemand) Init(opts GenStageOptions) interface{} {
@@ -186,6 +203,172 @@ func (dd *dispatcherDemand) Dispatch(events etf.List, state interface{}) []GenSt
 	return dispatchItems
 }
 
+func (dd *dispatcherDemand) Subscribe(subscription GenStageSubscription, opts GenStageSubscribeOptions, state interface{}) error {
+	st := state.(*demandState)
+	newDemand := &demand{
+		subscription: subscription,
+		minDemand:    opts.MinDemand,
+		maxDemand:    opts.MaxDemand,
+	}
+	st.demands[subscription.Pid] = newDemand
+	st.order = append(st.order, subscription.Pid)
+	return nil
+}
+
+//
+// Dispatcher Broadcast implementation
+//
+
+func (db *dispatcherBroadcast) Init(opts GenStageOptions) interface{} {
+	return nil
+}
+
+func (db *dispatcherBroadcast) Ask(subscription GenStageSubscription, count uint, state interface{}) {
+	return
+}
+
+func (db *dispatcherBroadcast) Cancel(subscription GenStageSubscription, state interface{}) {
+	return
+}
+
+func (db *dispatcherBroadcast) Dispatch(events etf.List, state interface{}) []GenStageDispatchItem {
+	return nil
+}
+
+func (db *dispatcherBroadcast) Subscribe(subscription GenStageSubscription, opts GenStageSubscribeOptions, state interface{}) error {
+	return nil
+}
+
+//
+// Dispatcher Partition implementation
+//
+func (dp *dispatcherPartition) Init(opts GenStageOptions) interface{} {
+	state := &partitionState{
+		demands:        make(map[etf.Pid]*demand),
+		order:          make([][]etf.Pid, dp.n),
+		i:              make([]int, dp.n),
+		events:         make([]chan etf.Term, dp.n),
+		bufferSize:     opts.BufferSize,
+		bufferKeepLast: opts.BufferKeepLast,
+	}
+	for i := range state.events {
+		state.events[i] = make(chan etf.Term, state.bufferSize)
+	}
+	return state
+}
+
+func (dp *dispatcherPartition) Ask(subscription GenStageSubscription, count uint, state interface{}) {
+	st := state.(*partitionState)
+	demand, ok := st.demands[subscription.Pid]
+	if !ok {
+		return
+	}
+	demand.n += count
+	return
+}
+
+func (dp *dispatcherPartition) Cancel(subscription GenStageSubscription, state interface{}) {
+	st := state.(*partitionState)
+	demand, ok := st.demands[subscription.Pid]
+	if !ok {
+		return
+	}
+	delete(st.demands, subscription.Pid)
+	for i := range st.order[demand.partition] {
+		if st.order[demand.partition][i] != subscription.Pid {
+			continue
+		}
+		st.order[demand.partition][i] = st.order[demand.partition][0]
+		st.order[demand.partition] = st.order[demand.partition][1:]
+		break
+	}
+	return
+}
+
+func (dp *dispatcherPartition) Dispatch(events etf.List, state interface{}) []GenStageDispatchItem {
+	st := state.(*partitionState)
+	// put events into the buffer before we start dispatching
+	for e := range events {
+		partition := dp.hash(events[e])
+		if partition < 0 || partition > int(dp.n-1) {
+			// discard this event. partition is out of range
+			continue
+		}
+		select {
+		case st.events[partition] <- events[e]:
+			continue
+		default:
+			// buffer is full
+			if st.bufferKeepLast {
+				<-st.events[partition]
+				st.events[partition] <- events[e]
+				continue
+			}
+		}
+		// seems we dont have enough space to keep these events. discard the rest of them.
+		break
+	}
+
+	dispatchItems := []GenStageDispatchItem{}
+	for partition := range st.events {
+		// do we have anything to dispatch?
+		if len(st.events[partition]) == 0 {
+			continue
+		}
+
+		for {
+			nLeft := uint(0)
+			for range st.order[partition] {
+				order_index := st.i[partition]
+				if order_index > len(st.order[partition])-1 {
+					order_index = 0
+				}
+				if len(st.events[partition]) == 0 {
+					// have nothing to dispatch
+					break
+				}
+
+				pid := st.order[partition][order_index]
+				demand := st.demands[pid]
+				st.i[partition] = order_index + 1
+
+				if demand.n == 0 || len(st.events[partition]) < int(demand.minDemand) {
+					continue
+				}
+
+				item := makeDispatchItem(st.events[partition], demand)
+				demand.n--
+				nLeft += demand.n
+				dispatchItems = append(dispatchItems, item)
+			}
+			if nLeft > 0 && len(st.events[partition]) > 0 {
+				continue
+			}
+			break
+		}
+
+	}
+
+	return dispatchItems
+}
+
+func (dp *dispatcherPartition) Subscribe(subscription GenStageSubscription, opts GenStageSubscribeOptions, state interface{}) error {
+	st := state.(*partitionState)
+	if opts.Partition > dp.n-1 {
+		return fmt.Errorf("unknown partition")
+	}
+	newDemand := &demand{
+		subscription: subscription,
+		minDemand:    opts.MinDemand,
+		maxDemand:    opts.MaxDemand,
+	}
+	st.demands[subscription.Pid] = newDemand
+	st.order[opts.Partition] = append(st.order[opts.Partition], subscription.Pid)
+	return nil
+}
+
+// private functions
+
 func makeDispatchItem(events chan etf.Term, d *demand) GenStageDispatchItem {
 	item := GenStageDispatchItem{
 		subscription: d.subscription,
@@ -209,70 +392,4 @@ func makeDispatchItem(events chan etf.Term, d *demand) GenStageDispatchItem {
 	}
 
 	return item
-}
-
-func (dd *dispatcherDemand) Subscribe(subscription GenStageSubscription, opts GenStageSubscribeOptions, state interface{}) {
-	st := state.(*demandState)
-	newDemand := &demand{
-		subscription: subscription,
-		minDemand:    opts.MinDemand,
-		maxDemand:    opts.MaxDemand,
-	}
-	st.demands[subscription.Pid] = newDemand
-	st.order = append(st.order, subscription.Pid)
-	return
-}
-
-//
-// Dispatcher Broadcast implementation
-//
-
-func (db *dispatcherBroadcast) Init(opts GenStageOptions) interface{} {
-	return nil
-}
-
-func (db *dispatcherBroadcast) Ask(subscription GenStageSubscription, count uint, state interface{}) {
-	return
-}
-
-func (db *dispatcherBroadcast) Cancel(subscription GenStageSubscription, state interface{}) {
-	return
-}
-
-func (db *dispatcherBroadcast) Dispatch(events etf.List, state interface{}) []GenStageDispatchItem {
-	return nil
-}
-
-func (db *dispatcherBroadcast) Subscribe(subscription GenStageSubscription, opts GenStageSubscribeOptions, state interface{}) {
-	return
-}
-
-//
-// Dispatcher Partition implementation
-//
-func (dp *dispatcherPartition) Init(opts GenStageOptions) interface{} {
-	state := &demandState{
-		demands:        make(map[etf.Pid]*demand),
-		i:              0,
-		events:         make(chan etf.Term, opts.BufferSize),
-		bufferSize:     opts.BufferSize,
-		bufferKeepLast: opts.BufferKeepLast,
-	}
-	return state
-}
-
-func (dp *dispatcherPartition) Ask(subscription GenStageSubscription, count uint, state interface{}) {
-	return
-}
-
-func (dp *dispatcherPartition) Cancel(subscription GenStageSubscription, state interface{}) {
-	return
-}
-
-func (dp *dispatcherPartition) Dispatch(events etf.List, state interface{}) []GenStageDispatchItem {
-	return nil
-}
-
-func (dp *dispatcherPartition) Subscribe(subscription GenStageSubscription, opts GenStageSubscribeOptions, state interface{}) {
-	return
 }
