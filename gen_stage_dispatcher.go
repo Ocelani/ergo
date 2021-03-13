@@ -280,10 +280,12 @@ func (db *dispatcherBroadcast) Dispatch(events etf.List, state interface{}) []Ge
 		// seems we dont have enough space to keep these events.
 		break
 	}
+
 	demand := &demand{
 		minDemand: st.minDemand,
 		maxDemand: st.maxDemand,
 	}
+
 	dispatchItems := []GenStageDispatchItem{}
 	for {
 		if st.broadcasts == 0 {

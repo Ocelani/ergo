@@ -169,7 +169,7 @@ type stateGenStage struct {
 	producers map[string]subscriptionInternal
 	// keep our subscribers
 	consumers map[etf.Pid]subscriptionInternal
-	// number of requested events by as a consumer.
+	// number of event requests (demands) by as a consumer.
 	events int
 }
 
@@ -450,6 +450,7 @@ func (gst *GenStage) HandleCall(from etf.Tuple, message etf.Term, state interfac
 	case setForwardDemand:
 		st.options.DisableForwarding = !m.forward
 		return "reply", "ok", state
+
 	case sendEvents:
 		var deliver []GenStageDispatchItem
 		// dispatch to the subscribers
@@ -457,7 +458,6 @@ func (gst *GenStage) HandleCall(from etf.Tuple, message etf.Term, state interfac
 		if len(deliver) == 0 {
 			return "reply", "ok", state
 		}
-
 		for d := range deliver {
 			msg := etf.Tuple{
 				etf.Atom("$gen_consumer"),
@@ -467,6 +467,7 @@ func (gst *GenStage) HandleCall(from etf.Tuple, message etf.Term, state interfac
 			st.p.Send(deliver[d].subscription.Pid, msg)
 		}
 		return "reply", "ok", state
+
 	case demandRequest:
 		subInternal, ok := st.producers[m.subscription.Ref.String()]
 		if !ok {
@@ -748,11 +749,23 @@ func handleConsumer(subscription GenStageSubscription, cmd stageRequestCommand, 
 			return nil, fmt.Errorf("Cancel reason is not a string")
 		}
 		state.p.DemonitorProcess(subscription.Ref)
-		delete(state.producers, subscription.Ref.String())
 
 		object := state.p.object
 		err = object.(GenStageBehaviour).HandleCanceled(subscription, reason, state.internal)
-		return etf.Atom("ok"), err
+		subInternal := state.producers[subscription.Ref.String()]
+		delete(state.producers, subscription.Ref.String())
+		switch subInternal.Options.Cancel {
+		case GenStageCancelTemporary:
+			return etf.Atom("ok"), err
+		case GenStageCancelTransient:
+			if reason == "normal" || reason == "shutdown" {
+				return etf.Atom("ok"), err
+			}
+			return nil, fmt.Errorf(reason)
+		default:
+			// GenStageCancelPermanent
+			return nil, fmt.Errorf(reason)
+		}
 	}
 
 	return nil, fmt.Errorf("unknown GenStage command (HandleCast)")
