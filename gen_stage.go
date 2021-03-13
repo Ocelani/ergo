@@ -119,6 +119,8 @@ type subscriptionInternal struct {
 	Subscription GenStageSubscription
 	Options      GenStageSubscribeOptions
 	Monitor      etf.Ref
+	// number of event requests (demands) made as a consumer.
+	count int
 }
 
 type GenStageSubscribeTo struct {
@@ -166,11 +168,9 @@ type stateGenStage struct {
 	dispatcherState interface{}
 	// keep our subscriptions
 	// key: string representation of etf.Ref (monitor)
-	producers map[string]subscriptionInternal
+	producers map[string]*subscriptionInternal
 	// keep our subscribers
-	consumers map[etf.Pid]subscriptionInternal
-	// number of event requests (demands) by as a consumer.
-	events int
+	consumers map[etf.Pid]*subscriptionInternal
 }
 
 type stageRequestCommandCancel struct {
@@ -400,8 +400,8 @@ func (gst *GenStage) Cancel(p *Process, subscription GenStageSubscription, reaso
 func (gst *GenStage) Init(p *Process, args ...interface{}) interface{} {
 	//var stageOptions GenStageOptions
 	state := &stateGenStage{
-		producers: make(map[string]subscriptionInternal),
-		consumers: make(map[etf.Pid]subscriptionInternal),
+		producers: make(map[string]*subscriptionInternal),
+		consumers: make(map[etf.Pid]*subscriptionInternal),
 	}
 
 	state.p = p
@@ -435,7 +435,6 @@ func (gst *GenStage) HandleCall(from etf.Tuple, message etf.Term, state interfac
 			return "reply", fmt.Errorf("unknown subscription"), state
 		}
 		subInternal.Options.ManualDemand = m.enable
-		st.producers[m.subscription.Ref.String()] = subInternal
 		return "reply", "ok", state
 
 	case setCancelMode:
@@ -444,7 +443,6 @@ func (gst *GenStage) HandleCall(from etf.Tuple, message etf.Term, state interfac
 			return "reply", fmt.Errorf("unknown subscription"), state
 		}
 		subInternal.Options.Cancel = m.cancel
-		st.producers[m.subscription.Ref.String()] = subInternal
 		return "reply", "ok", state
 
 	case setForwardDemand:
@@ -484,7 +482,7 @@ func (gst *GenStage) HandleCall(from etf.Tuple, message etf.Term, state interfac
 			etf.Tuple{etf.Atom("ask"), m.count},
 		}
 		st.p.Send(producer, msg)
-		st.events += int(m.count)
+		subInternal.count += int(m.count)
 		return "reply", "ok", state
 
 	case cancelSubscription:
@@ -675,14 +673,14 @@ func handleConsumer(subscription GenStageSubscription, cmd stageRequestCommand, 
 		object := state.p.object
 		numEvents := len(events)
 
-		state.events--
-		if state.events < 0 {
-			return nil, fmt.Errorf("got %d events which haven't bin requested", numEvents)
-		}
 		subInternal, ok := state.producers[subscription.Ref.String()]
 		if !ok {
 			fmt.Printf("Warning! got %d events for unknown subscription %#v\n", numEvents, subscription)
 			return etf.Atom("ok"), nil
+		}
+		subInternal.count--
+		if subInternal.count < 0 {
+			return nil, fmt.Errorf("got %d events which haven't bin requested", numEvents)
 		}
 		if numEvents < int(subInternal.Options.MinDemand) {
 			return nil, fmt.Errorf("got %d events which is less than min %d", numEvents, subInternal.Options.MinDemand)
@@ -698,14 +696,14 @@ func handleConsumer(subscription GenStageSubscription, cmd stageRequestCommand, 
 
 		// if subscription has auto demand we should request yet another
 		// bunch of events
-		if state.events < 2 && !subInternal.Options.ManualDemand {
+		if subInternal.count < 2 && !subInternal.Options.ManualDemand {
 			msg := etf.Tuple{
 				etf.Atom("$gen_producer"),
 				etf.Tuple{subscription.Pid, subscription.Ref},
 				etf.Tuple{etf.Atom("ask"), 2},
 			}
 			state.p.Send(subInternal.Producer, msg)
-			state.events = state.events + 2
+			subInternal.count += 2
 		}
 		return etf.Atom("ok"), nil
 
@@ -723,7 +721,7 @@ func handleConsumer(subscription GenStageSubscription, cmd stageRequestCommand, 
 		subscriptionOpts.ManualDemand = manualDemand
 
 		producer := cmd.Opt1
-		subInternal := subscriptionInternal{
+		subInternal := &subscriptionInternal{
 			Subscription: subscription,
 			Producer:     producer,
 			Options:      subscriptionOpts,
@@ -737,7 +735,7 @@ func handleConsumer(subscription GenStageSubscription, cmd stageRequestCommand, 
 				etf.Tuple{etf.Atom("ask"), 2},
 			}
 			state.p.Send(producer, msg)
-			state.events = state.events + 2
+			subInternal.count = 2
 		}
 
 		return etf.Atom("ok"), nil
@@ -826,7 +824,6 @@ func handleProducer(subscription GenStageSubscription, cmd stageRequestCommand, 
 				}
 
 				s.Subscription = subscription
-				state.consumers[subscription.Pid] = s
 				return etf.Atom("ok"), nil
 			}
 
@@ -844,7 +841,7 @@ func handleProducer(subscription GenStageSubscription, cmd stageRequestCommand, 
 			// monitor subscriber in order to remove this subscription
 			// if it terminated unexpectedly
 			m := state.p.MonitorProcess(subscription.Pid)
-			s := subscriptionInternal{
+			s := &subscriptionInternal{
 				Subscription: subscription,
 				Monitor:      m,
 				Options:      subscriptionOpts,
