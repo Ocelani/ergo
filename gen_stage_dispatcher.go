@@ -263,8 +263,48 @@ func (db *dispatcherBroadcast) Cancel(subscription GenStageSubscription, state i
 }
 
 func (db *dispatcherBroadcast) Dispatch(events etf.List, state interface{}) []GenStageDispatchItem {
-	//FIXME
-	return nil
+	st := state.(*broadcastState)
+	// put events into the buffer before we start dispatching
+	for e := range events {
+		select {
+		case st.events <- events[e]:
+			continue
+		default:
+			// buffer is full
+			if st.bufferKeepLast {
+				<-st.events
+				st.events <- events[e]
+				continue
+			}
+		}
+		// seems we dont have enough space to keep these events.
+		break
+	}
+	demand := &demand{
+		minDemand: st.minDemand,
+		maxDemand: st.maxDemand,
+	}
+	dispatchItems := []GenStageDispatchItem{}
+	for {
+		if st.broadcasts == 0 {
+			break
+		}
+		if len(st.events) < int(st.minDemand) {
+			break
+		}
+
+		broadcast_item := makeDispatchItem(st.events, demand)
+		for _, d := range st.demands {
+			item := GenStageDispatchItem{
+				subscription: d.subscription,
+				events:       broadcast_item.events,
+			}
+			dispatchItems = append(dispatchItems, item)
+			d.count--
+		}
+		st.broadcasts--
+	}
+	return dispatchItems
 }
 
 func (db *dispatcherBroadcast) Subscribe(subscription GenStageSubscription, opts GenStageSubscribeOptions, state interface{}) error {
