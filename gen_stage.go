@@ -854,7 +854,7 @@ func handleProducer(subscription GenStageSubscription, cmd stageRequestCommand, 
 			msg := etf.Tuple{
 				etf.Atom("$gen_consumer"),
 				etf.Tuple{subscription.Pid, subscription.Ref},
-				etf.Tuple{etf.Atom("cancel"), "not a producer"},
+				etf.Tuple{etf.Atom("cancel"), err.Error()},
 			}
 			state.p.Send(subscription.Pid, msg)
 			return etf.Atom("ok"), nil
@@ -876,7 +876,7 @@ func handleProducer(subscription GenStageSubscription, cmd stageRequestCommand, 
 		default:
 			return nil, fmt.Errorf("Demand has wrong value %#v. Expected positive integer", cmd.Opt1)
 		}
-		if count < 1 {
+		if count == 0 {
 			// just ignore it
 			return etf.Atom("ok"), nil
 		}
