@@ -1,10 +1,9 @@
-<h1> <img src=".images/logo.svg" alt="Ergo Framework" width="159" height="49"></h1>
+<h1><a href="https://ergo.services"><img src=".images/logo.svg" alt="Ergo Framework" width="159" height="49"></a></h1>
 
 [![GitHub release](https://img.shields.io/github/release/halturin/ergo.svg)](https://github.com/halturin/ergo/releases/latest)
 [![Go Report Card](https://goreportcard.com/badge/github.com/halturin/ergo)](https://goreportcard.com/report/github.com/halturin/ergo)
 [![GoDoc](https://godoc.org/halturin/ergo?status.svg)](https://godoc.org/github.com/halturin/ergo)
 [![MIT license](https://img.shields.io/badge/license-MIT-brightgreen.svg)](https://opensource.org/licenses/MIT)
-[![codecov](https://codecov.io/gh/halturin/ergo/graph/badge.svg)](https://codecov.io/gh/halturin/ergo)
 [![Build Status](https://travis-ci.org/halturin/ergo.svg)](https://travis-ci.org/halturin/ergo)
 
 Technologies and design patterns of Erlang/OTP have been proven over the years. Now in Golang.
